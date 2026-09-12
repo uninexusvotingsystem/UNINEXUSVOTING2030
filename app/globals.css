@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  color-scheme: light;
+}
+
+@layer base {
+  * {
+    @apply border-ink-line;
+  }
+  html {
+    scroll-behavior: smooth;
+    color-scheme: light;
+  }
+  body {
+    @apply bg-cream text-ink font-sans antialiased;
+  }
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  input, textarea, select {
+    @apply bg-white text-ink;
+    color-scheme: light;
+  }
+  input::placeholder, textarea::placeholder {
+    @apply text-ink/40;
+  }
+  :focus-visible {
+    outline: 2px solid #C9A227;
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  .eyebrow {
+    @apply text-[11px] tracking-[0.28em] uppercase text-gold font-semibold;
+  }
+  .heading-display {
+    font-family: var(--font-display);
+    @apply font-semibold leading-[1.05] tracking-tight;
+  }
+  .gold-text {
+    background: linear-gradient(135deg, #F4E3A1 0%, #C9A227 55%, #8F6E14 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .surface-ink {
+    @apply bg-ink text-cream;
+  }
+  .hairline-gold {
+    @apply border border-gold/25;
+  }
+  .card-elegant {
+    @apply bg-ivory rounded-xl2 shadow-elegant border border-black/5;
+  }
+  .btn-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-gold-foil px-6 py-3 text-sm font-semibold text-ink shadow-gold transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98];
+  }
+  .btn-outline-gold {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-gold/50 px-6 py-3 text-sm font-semibold text-gold transition-colors duration-200 hover:bg-gold hover:text-ink;
+  }
+  .btn-ghost-cream {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-cream/85 transition-colors hover:text-gold;
+  }
+  .reveal {
+    @apply animate-fade-up;
+  }
+  .marquee-track {
+    @apply flex w-max animate-marquee gap-16 whitespace-nowrap;
+  }
+}
