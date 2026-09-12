@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Script from "next/script";
 import { createClient } from "@/lib/supabase/client";
 import { Loader2, UploadCloud, X, CheckCircle2 } from "lucide-react";
+import { SiteFooter } from "@/components/site-footer";
 
 const MAX_MEDIA = 6;
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -196,6 +197,9 @@ export default function NominatePage() {
         <Suspense fallback={null}>
           <NominateFormInner />
         </Suspense>
+      </div>
+      <div className="mt-14">
+        <SiteFooter />
       </div>
     </div>
   );

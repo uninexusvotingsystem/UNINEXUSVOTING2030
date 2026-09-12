@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ArrowRight, Trophy, UserPlus } from "lucide-react";
+import { ArrowRight, Trophy, UserPlus, Ticket } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-
-const MAIN_SITE_URL = process.env.NEXT_PUBLIC_MAIN_SITE_URL || "https://uninexusconnectplatform.co.ke";
+import { SiteFooter } from "@/components/site-footer";
+import { MAIN_SITE_URL, GALA_TICKETS_URL } from "@/lib/constants";
 
 async function getCategories() {
   const supabase = createClient();
@@ -14,7 +14,7 @@ export default async function HomePage() {
   const categories = await getCategories();
 
   return (
-    <div className="bg-cream min-h-screen">
+    <div className="bg-cream min-h-screen flex flex-col">
       <section className="surface-ink py-20 sm:py-28 text-center">
         <div className="container max-w-2xl">
           <p className="eyebrow mb-4">UNX Awards</p>
@@ -25,7 +25,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <section className="container py-14 sm:py-20">
+      <section className="container py-14 sm:py-20 flex-1">
         <div className="grid gap-5">
           {categories.map((c) => (
             <div key={c.id} className="card-elegant p-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -59,6 +59,14 @@ export default async function HomePage() {
         </div>
 
         <div className="mt-14 card-elegant p-8 text-center max-w-xl mx-auto">
+          <h3 className="font-display text-xl mb-2">Attending the Gala?</h3>
+          <p className="text-sm text-ink/60 mb-4">Get your tickets to the UniNexus Connect Gala Awards — this year's winners are announced live.</p>
+          <a href={GALA_TICKETS_URL} target="_blank" rel="noreferrer" className="btn-gold inline-flex !py-3 !px-6">
+            <Ticket className="size-4" /> Buy tickets
+          </a>
+        </div>
+
+        <div className="mt-6 card-elegant p-8 text-center max-w-xl mx-auto">
           <h3 className="font-display text-xl mb-2">Not a UniNexus Connect member yet?</h3>
           <p className="text-sm text-ink/60 mb-4">Join UniNexus Connect to follow every event, category and update across Kenyan universities.</p>
           <a href={`${MAIN_SITE_URL}/auth`} className="btn-gold inline-flex !py-3 !px-6">
@@ -66,6 +74,8 @@ export default async function HomePage() {
           </a>
         </div>
       </section>
+
+      <SiteFooter />
     </div>
   );
 }
