@@ -29,12 +29,12 @@ export async function sendNewNominationAlertEmail({
   if (!to) return; // Notifications are optional — skip quietly if not configured.
 
   return sendOrThrow({
-    from: process.env.RESEND_FROM_EMAIL || "UNX Awards <notifications@unx-awards.co.ke>",
+    from: process.env.RESEND_FROM_EMAIL || "UniNexus Connect Gala Awards <notifications@unx-awards.co.ke>",
     to,
     subject: `New nomination: ${nomineeName} (${categoryName})`,
     html: `
       <div style="font-family: Georgia, serif; background:#0A0A0B; color:#FAF7EF; padding:32px; border-radius:12px;">
-        <p style="color:#C9A227; letter-spacing:2px; font-size:12px; text-transform:uppercase;">UNX Awards</p>
+        <p style="color:#C9A227; letter-spacing:2px; font-size:12px; text-transform:uppercase;">UniNexus Connect Gala Awards</p>
         <h1 style="font-size:20px; margin:8px 0 16px;">New nomination awaiting moderation</h1>
         <p><strong>${nomineeName}</strong> was just nominated in <strong>${categoryName}</strong>.</p>
         <p>Review it in the admin panel under Nominees (filtered to "Pending").</p>

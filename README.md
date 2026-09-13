@@ -1,4 +1,4 @@
-# UNX Awards — standalone nominations + voting system
+# UniNexus Connect Gala Awards — standalone nominations + voting system
 
 A fully separate system from UniNexus Connect: its own domain, its own Supabase
 project, its own admin panel. Built so a public, high-traffic voting event

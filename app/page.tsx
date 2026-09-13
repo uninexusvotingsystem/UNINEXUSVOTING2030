@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, Trophy, UserPlus, Ticket } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { SiteFooter } from "@/components/site-footer";
@@ -15,12 +16,15 @@ export default async function HomePage() {
 
   return (
     <div className="bg-cream min-h-screen flex flex-col">
-      <section className="surface-ink py-20 sm:py-28 text-center">
+      <section className="surface-ink py-16 sm:py-24 text-center">
         <div className="container max-w-2xl">
-          <p className="eyebrow mb-4">UNX Awards</p>
+          <div className="inline-block bg-cream rounded-2xl p-4 sm:p-5 shadow-[0_8px_40px_-8px_rgba(201,162,39,0.45)] mb-8">
+            <Image src="/logos/gala-logo.png" alt="UniNexus Connect Gala Awards" width={800} height={708}
+              className="w-48 sm:w-64 h-auto" priority />
+          </div>
           <h1 className="heading-display text-4xl sm:text-6xl text-cream mb-5">Nominate. Vote. Celebrate.</h1>
           <p className="text-cream/65 leading-relaxed">
-            Recognizing the people who make campuses across Kenya extraordinary — nominate someone, or cast your vote once nominations close.
+            Recognizing and honouring the leaders, founders, creative talents, entrepreneurs, innovators, and changemakers shaping the future of Kenya&apos;s campuses, colleges &amp; education institutions.
           </p>
         </div>
       </section>

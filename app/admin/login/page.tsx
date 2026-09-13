@@ -33,7 +33,7 @@ function LoginForm() {
     <div className="min-h-screen surface-ink flex items-center justify-center py-14">
       <div className="container max-w-sm">
         <div className="card-elegant p-8">
-          <h1 className="heading-display text-2xl mb-6 text-center">UNX Awards — Admin</h1>
+          <h1 className="heading-display text-2xl mb-6 text-center">UniNexus Connect Gala Awards — Admin</h1>
 
           {notAdmin && (
             <div className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">

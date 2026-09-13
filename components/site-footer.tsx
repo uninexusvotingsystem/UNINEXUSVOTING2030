@@ -16,7 +16,7 @@ export function SiteFooter() {
       <div className="container">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6 pb-10 border-b border-white/10">
           <div>
-            <p className="font-display text-xl text-cream mb-1">UNX Awards</p>
+            <p className="font-display text-xl text-cream mb-1">UniNexus Connect Gala Awards</p>
             <p className="text-sm text-cream/50">Nominate. Vote. Celebrate.</p>
           </div>
 
@@ -42,7 +42,7 @@ export function SiteFooter() {
 
         <div className="py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <p className="text-sm text-cream/50 max-w-md">
-            This is UNX Awards, a standalone nominations &amp; voting platform run alongside UniNexus Connect.
+            This is the official nominations &amp; voting platform for the UniNexus Connect Gala Awards.
           </p>
           <a href={MAIN_SITE_URL} target="_blank" rel="noreferrer"
             className="btn-outline-gold !py-2.5 !px-5 text-sm inline-flex items-center gap-2 shrink-0">

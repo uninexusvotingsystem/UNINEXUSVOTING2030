@@ -22,11 +22,16 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "UNX Awards",
-    template: "%s | UNX Awards",
+    default: "UniNexus Connect Gala Awards",
+    template: "%s | UniNexus Connect Gala Awards",
   },
-  description: "Nominate, and vote for, the people who make campuses across Kenya extraordinary.",
+  description: "Recognizing and honouring the leaders, founders, creative talents, entrepreneurs, innovators, and changemakers shaping the future of Kenya's campuses, colleges & education institutions.",
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://unx-awards.vercel.app"),
+  openGraph: {
+    title: "UniNexus Connect Gala Awards",
+    description: "Nominate, and vote for, the people shaping the future of Kenya's campuses.",
+    images: ["/logos/gala-logo.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
