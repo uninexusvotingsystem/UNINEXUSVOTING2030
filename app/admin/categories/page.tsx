@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Plus, Link2, Trash2 } from "lucide-react";
+import { Loader2, Plus, Link2, Trash2, Globe } from "lucide-react";
 
 const EMPTY = { name: "", slug: "", description: "" };
 
@@ -48,6 +48,12 @@ export default function AdminCategoriesPage() {
     load();
   }
 
+  function copyGeneralLink() {
+    const url = `${location.origin}/`;
+    navigator.clipboard.writeText(url);
+    alert(`Copied general link (every category, for both nominating and voting):\n${url}`);
+  }
+
   function copyNominateLink(slug: string) {
     const url = `${location.origin}/nominate?category=${slug}`;
     navigator.clipboard.writeText(url);
@@ -62,7 +68,11 @@ export default function AdminCategoriesPage() {
 
   return (
     <div className="p-8 sm:p-10 max-w-4xl">
-      <h1 className="heading-display text-3xl mb-8">Categories</h1>
+      <h1 className="heading-display text-3xl mb-1">Categories</h1>
+      <p className="text-sm text-ink/50 mb-4">Create categories, manage open/closed state, and share links.</p>
+      <button onClick={copyGeneralLink} className="mb-8 text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1.5">
+        <Globe className="size-3.5" /> Copy general link (every category — nominate &amp; vote)
+      </button>
 
       <form onSubmit={addCategory} className="card-elegant p-6 space-y-3 mb-8">
         <h2 className="font-display text-lg mb-1">New category</h2>
