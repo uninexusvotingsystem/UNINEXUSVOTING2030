@@ -49,7 +49,17 @@ create table if not exists public.categories (
 -- moderation gate: you can collect as many raw submissions as come in, then
 -- prune down to your target shortlist (e.g. ~10 per category) before voting
 -- ever opens, without the public ever seeing the unmoderated flood.
-create type public.nominee_status as enum ('pending', 'approved', 'rejected');
+-- Wrapped for idempotency, unlike a bare CREATE TYPE — running this migration
+-- a second time (e.g. after fixing an earlier error and re-pasting the whole
+-- script) would otherwise fail here with "type already exists" and, because
+-- Supabase runs a pasted script as one transaction, silently abort every
+-- statement after this line — including the nominees table itself. That
+-- produces exactly a generic "table does not exist" failure on every
+-- nomination submission, with no obvious cause from the app side.
+do $$ begin
+  create type public.nominee_status as enum ('pending', 'approved', 'rejected');
+exception when duplicate_object then null;
+end $$;
 
 create table if not exists public.nominees (
   id uuid primary key default gen_random_uuid(),

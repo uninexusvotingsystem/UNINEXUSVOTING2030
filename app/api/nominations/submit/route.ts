@@ -9,9 +9,6 @@ import * as Sentry from "@sentry/nextjs";
 
 const MAX_MEDIA_ITEMS = 6;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB
-// A hard duration check needs video-processing tooling this environment doesn't
-// have; capping file size is the practical proxy for "keep it to ~20 seconds" —
-// a properly compressed 20s clip comfortably fits well under this.
 const MAX_VIDEO_BYTES = 25 * 1024 * 1024; // 25MB
 
 const fieldsSchema = z.object({
@@ -20,12 +17,30 @@ const fieldsSchema = z.object({
   about: z.string().trim().min(10).max(600),
   submitterEmail: z.string().trim().email().optional().or(z.literal("")),
   submitterPhone: z.string().trim().max(20).optional().or(z.literal("")),
-  // Honeypot: a hidden field real visitors never see or fill in, but a scripted
-  // bot filling every input on the page typically does. Silently accepting
-  // (not rejecting) a filled honeypot avoids teaching a bot which field gave it
-  // away, while never actually storing anything it submitted.
   website: z.string().optional().or(z.literal("")),
 });
+
+// A short-lived cache of category status, shared across requests handled by
+// the same warm serverless instance. Categories change rarely (an admin
+// toggles nominations_open a handful of times, not constantly), but this
+// endpoint is hit on EVERY single submission — during a burst of nominations
+// (e.g. right after a category link gets shared widely), that's a lot of
+// identical "is this category still open" reads hitting Supabase for
+// information that was almost certainly still true 20 seconds ago. Caching it
+// briefly cuts real database load under exactly the burst conditions this was
+// asked to handle better, without ever letting a stale "open" status persist
+// for more than a few seconds after an admin actually closes a category.
+const CATEGORY_CACHE_TTL_MS = 20_000;
+const categoryCache = new Map<string, { data: { id: string; name: string; nominations_open: boolean }; expiresAt: number }>();
+
+async function getCategoryCached(supabase: ReturnType<typeof createServiceRoleClient>, categoryId: string) {
+  const cached = categoryCache.get(categoryId);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  const { data } = await supabase.from("categories").select("id, name, nominations_open").eq("id", categoryId).maybeSingle();
+  if (data) categoryCache.set(categoryId, { data, expiresAt: Date.now() + CATEGORY_CACHE_TTL_MS });
+  return data;
+}
 
 export async function POST(request: Request) {
   const corsBlock = enforceCors(request);
@@ -52,7 +67,6 @@ export async function POST(request: Request) {
 
     const { name, categoryId, about, submitterEmail, submitterPhone, website } = parsed.data;
 
-    // Honeypot tripped — pretend success, save nothing.
     if (website) {
       return NextResponse.json({ ok: true });
     }
@@ -91,13 +105,11 @@ export async function POST(request: Request) {
 
     const supabase = createServiceRoleClient();
 
-    const { data: category } = await supabase.from("categories").select("id, name, nominations_open").eq("id", categoryId).maybeSingle();
+    const category = await getCategoryCached(supabase, categoryId);
     if (!category || !category.nominations_open) {
       return NextResponse.json({ error: "Nominations aren't open for this category right now." }, { status: 400 });
     }
 
-    // The nominee row is created as 'pending' no matter what — nothing from this
-    // endpoint is ever visible to the public until an admin approves it.
     const { data: nominee, error: insertErr } = await supabase
       .from("nominees")
       .insert({
@@ -111,32 +123,53 @@ export async function POST(request: Request) {
       .select("id")
       .single();
 
-    if (insertErr || !nominee) throw insertErr || new Error("Failed to save nomination.");
+    if (insertErr || !nominee) {
+      // Logged with the full Supabase error (code + message + hint) rather than
+      // just re-thrown generically — this is exactly the detail that tells you
+      // whether it's a missing table, an RLS denial, or something else, instead
+      // of every failure looking identical from the outside.
+      console.error("[nominations] insert failed:", JSON.stringify(insertErr));
+      Sentry.captureException(new Error(`Nominee insert failed: ${insertErr?.message || "no row returned"}`), {
+        extra: { categoryId, supabaseError: insertErr },
+      });
+      throw insertErr || new Error("Failed to save nomination.");
+    }
 
-    let sortOrder = 0;
-    for (const file of files) {
-      const isVideo = file.type.startsWith("video/");
-      const ext = file.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
-      const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
-      const bytes = new Uint8Array(await file.arrayBuffer());
+    // Media uploads run in parallel rather than one-at-a-time — with the
+    // maximum of 6 items, a sequential loop meant a nomination with several
+    // photos plus a video could take several times longer to finish than one
+    // with just text, for no real reason: each file's upload+DB-row insert is
+    // fully independent of the others.
+    if (files.length > 0) {
+      const results = await Promise.allSettled(
+        files.map(async (file, index) => {
+          const isVideo = file.type.startsWith("video/");
+          const ext = file.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
+          const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
+          const bytes = new Uint8Array(await file.arrayBuffer());
 
-      const { error: uploadErr } = await supabase.storage.from("nominee-media").upload(path, bytes, { contentType: file.type });
-      if (uploadErr) {
-        Sentry.captureException(uploadErr);
-        continue; // Don't fail the whole nomination over one bad file upload.
-      }
+          const { error: uploadErr } = await supabase.storage.from("nominee-media").upload(path, bytes, { contentType: file.type });
+          if (uploadErr) throw uploadErr;
 
-      const { data: pub } = supabase.storage.from("nominee-media").getPublicUrl(path);
-      await supabase.from("nominee_media").insert({
-        nominee_id: nominee.id,
-        media_url: pub.publicUrl,
-        media_type: isVideo ? "video" : "image",
-        sort_order: sortOrder++,
+          const { data: pub } = supabase.storage.from("nominee-media").getPublicUrl(path);
+          const { error: mediaInsertErr } = await supabase.from("nominee_media").insert({
+            nominee_id: nominee.id,
+            media_url: pub.publicUrl,
+            media_type: isVideo ? "video" : "image",
+            sort_order: index,
+          });
+          if (mediaInsertErr) throw mediaInsertErr;
+        })
+      );
+
+      // One bad file shouldn't cost the whole nomination (already-verified text
+      // is saved regardless) — but each failure is still logged individually so
+      // it's visible, not silently dropped.
+      results.forEach((r) => {
+        if (r.status === "rejected") Sentry.captureException(r.reason);
       });
     }
 
-    // Best-effort notification — a failed email should never make the nomination
-    // itself fail, since it's already safely saved either way.
     try {
       await sendNewNominationAlertEmail({ nomineeName: name, categoryName: category.name });
     } catch (emailErr) {
