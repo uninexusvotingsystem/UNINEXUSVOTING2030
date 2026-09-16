@@ -6,9 +6,17 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isAdminRoute = path.startsWith("/admin") && path !== "/admin/login";
 
-  if (!isAdminRoute) return NextResponse.next();
+  // Every request gets its pathname forwarded as a header — this is how Server
+  // Components (which have no usePathname() equivalent) can tell whether
+  // they're rendering inside /admin, so the public marquee/cookie chrome can be
+  // skipped there. Cheap: a header write, no Supabase call.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", path);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
 
-  const response = NextResponse.next();
+  // The Supabase auth check below is a real network round-trip — only pay for
+  // it on routes that actually need guarding, not on every public page load.
+  if (!isAdminRoute) return response;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,5 +67,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  // Runs on every route (needed for the x-pathname header) except static
+  // assets, which don't render through the React tree anyway.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 };

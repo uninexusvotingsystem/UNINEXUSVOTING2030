@@ -6,6 +6,11 @@ const redis =
     ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_REST_TOKEN })
     : null;
 
+/** True when rate limiting is actually active. Without Redis configured, every
+ *  limiter below is null and silently enforces nothing — worth being able to
+ *  detect explicitly rather than assuming protection that isn't there. */
+export const rateLimitingEnabled = Boolean(redis);
+
 function makeLimiter(requests: number, window: `${number} ${"s" | "m" | "h"}`) {
   if (!redis) return null;
   return new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(requests, window), analytics: true });
@@ -16,10 +21,23 @@ function makeLimiter(requests: number, window: `${number} ${"s" | "m" | "h"}`) {
 // the main defense against someone (or a bot) flooding a category with junk
 // submissions faster than a human ever could.
 export const nominationSubmitLimiter = makeLimiter(5, "1 h");
+
 export const otpRequestPhoneLimiter = makeLimiter(3, "15 m");
 export const otpRequestIpLimiter = makeLimiter(10, "15 m");
 export const otpVerifyLimiter = makeLimiter(8, "15 m");
-export const voteIpLimiter = makeLimiter(30, "1 h");
+
+// Voting limits, tightened for the reality of shared connections. A whole
+// university campus, hostel, or cyber cafe can share ONE public IP, so a
+// per-IP limit has to leave room for many genuine voters — but a burst limit
+// alongside it still catches scripted mass-voting, which hits far faster than
+// any realistic crowd of people typing on phones.
+export const voteIpLimiter = makeLimiter(40, "1 h");
+export const voteBurstLimiter = makeLimiter(5, "1 m");
+
+// A blunt per-IP ceiling across ALL API routes — the cheap first line against
+// someone simply hammering the site during voting hours. Deliberately high
+// enough that no real person on a shared campus connection ever trips it.
+export const globalApiLimiter = makeLimiter(120, "1 m");
 
 export function clientIp(request: Request) {
   const fwd = request.headers.get("x-forwarded-for");

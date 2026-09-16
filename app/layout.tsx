@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
+import { PublicChrome } from "@/components/public-chrome";
 
 const display = Cormorant_Garamond({
   subsets: ["latin"],
@@ -41,7 +42,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:z-[100] focus:bg-gold focus:text-ink focus:px-4 focus:py-2 focus:rounded-md">
           Skip to content
         </a>
+        <PublicChrome slot="top" />
         <main id="main">{children}</main>
+        <PublicChrome slot="bottom" />
       </body>
     </html>
   );

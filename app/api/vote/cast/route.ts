@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createHash } from "crypto";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { hashValue, normalizePhone } from "@/lib/otp";
-import { voteIpLimiter, enforceRateLimit, clientIp } from "@/lib/rate-limit";
+import { voteIpLimiter, voteBurstLimiter, globalApiLimiter, enforceRateLimit, clientIp } from "@/lib/rate-limit";
 import { enforceCors } from "@/lib/cors";
 import * as Sentry from "@sentry/nextjs";
 
@@ -19,7 +19,10 @@ export async function POST(request: Request) {
   if (corsBlock) return corsBlock;
 
   const ip = clientIp(request);
-  const blocked = await enforceRateLimit(voteIpLimiter, `vote:ip:${ip}`);
+  const blocked =
+    (await enforceRateLimit(globalApiLimiter, `global:${ip}`)) ||
+    (await enforceRateLimit(voteBurstLimiter, `vote:burst:${ip}`)) ||
+    (await enforceRateLimit(voteIpLimiter, `vote:ip:${ip}`));
   if (blocked) return blocked;
 
   try {

@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { LayoutList, Trophy, LogOut } from "lucide-react";
+import { LayoutList, Trophy, LogOut, Settings } from "lucide-react";
 
 const LINKS = [
   { href: "/admin/nominees", label: "Nominees", icon: LayoutList },
   { href: "/admin/categories", label: "Categories", icon: Trophy },
+  { href: "/admin/settings", label: "Site Settings", icon: Settings },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

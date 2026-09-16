@@ -80,6 +80,12 @@ can never affect the main site's members, tickets, or payments.
   you're on Pro and want tighter precision on deadlines, change the schedule
   in `vercel.json` to `0 * * * *` (hourly) or `*/15 * * * *` (every 15 min).
 
+## Managing the scrolling banner
+
+Admin → Site Settings. The gold banner scrolling across the top of every
+public page is edited there and updates for visitors within seconds — no
+redeploy needed. Seeded with the launch message by migration `0003`.
+
 ## Security notes
 
 - Every table has Row-Level Security; public submissions go through a
@@ -95,3 +101,29 @@ can never affect the main site's members, tickets, or payments.
   reach the server, on top of the honeypot and rate limiting.
 - CSP, HSTS, and clickjacking protection headers are already configured in
   `next.config.mjs`.
+- Cloudflare Turnstile guards BOTH the nomination form and the OTP request
+  step. The OTP one matters most: every code sent costs you real SMS money,
+  so without it a script could drain your Africa's Talking balance just by
+  requesting codes in a loop.
+- Layered rate limiting, all per-IP: a global ceiling across every API route
+  (120/min), a burst limit on voting and OTP requests (5/min), and slower
+  sustained limits on top (40 votes/hr, 3 OTPs per phone per 15 min). The
+  burst limits are what actually catch scripted mass-voting, while the
+  sustained limits stay generous enough for a whole campus sharing one IP.
+- **All of the above depends on `UPSTASH_REDIS_REST_URL` and
+  `UPSTASH_REDIS_REST_TOKEN` being set.** Without them every limiter silently
+  enforces nothing — set them before voting opens.
+- A diagnostics endpoint at `/api/diagnostics?key=YOUR_CRON_SECRET` checks
+  env vars, database access, table inserts, and storage in one page, so a
+  failure can be pinpointed instead of guessed at.
+
+## A note on true DDoS protection
+
+Rate limiting stops abuse at the application layer — one IP hammering your
+endpoints. A genuine distributed attack (thousands of IPs at once) has to be
+absorbed *before* it reaches your app, which is infrastructure, not code:
+Vercel's platform absorbs a baseline automatically, and **Vercel Pro adds the
+configurable Firewall / Attack Challenge Mode** you can switch on during
+voting hours. If a high-stakes vote is happening, that upgrade is the single
+most effective protection available — worth having ready before the night
+itself.

@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Script from "next/script";
 import { CheckCircle2, Loader2, AlertCircle, Smartphone, ShieldCheck } from "lucide-react";
+
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 type Nominee = {
   id: string;
@@ -30,10 +33,21 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
     setLoading(true);
     setError(null);
     try {
+      let turnstileToken: string | undefined;
+      if (TURNSTILE_SITE_KEY) {
+        const input = document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]');
+        if (!input?.value) {
+          setError("Please complete the verification check first.");
+          setLoading(false);
+          return;
+        }
+        turnstileToken = input.value;
+      }
+
       const res = await fetch("/api/vote/otp-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, phone }),
+        body: JSON.stringify({ categoryId, phone, turnstileToken }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Couldn't send a code.");
@@ -92,6 +106,9 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
 
         {step === "phone" ? (
           <form onSubmit={sendCode} className="space-y-3">
+            {TURNSTILE_SITE_KEY && (
+              <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
+            )}
             <label className="text-xs font-semibold text-ink/50 uppercase tracking-wider">Your phone number</label>
             <div className="relative">
               <Smartphone className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-ink/40" />
@@ -103,6 +120,9 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
                 className="w-full rounded-lg border border-black/10 pl-10 pr-4 py-3 text-sm focus:border-gold outline-none"
               />
             </div>
+            {TURNSTILE_SITE_KEY && (
+              <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="light" />
+            )}
             <button type="submit" disabled={loading} className="btn-gold w-full !py-3.5 disabled:opacity-60">
               {loading ? <Loader2 className="size-4 animate-spin" /> : "Send verification code"}
             </button>
