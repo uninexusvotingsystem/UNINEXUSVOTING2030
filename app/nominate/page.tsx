@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { Loader2, UploadCloud, X, CheckCircle2 } from "lucide-react";
 import { SiteFooter } from "@/components/site-footer";
 
-const MAX_MEDIA = 6;
+const MAX_MEDIA = 2;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 function NominateFormInner() {
@@ -34,7 +35,11 @@ function NominateFormInner() {
 
   function addFiles(newFiles: FileList | null) {
     if (!newFiles) return;
-    const combined = [...files, ...Array.from(newFiles)].slice(0, MAX_MEDIA);
+    // Silently drop anything that isn't an allowed image type (e.g. video) —
+    // the accept attribute on the input already steers people away from this,
+    // but a filter here catches drag-and-drop and other paths around it.
+    const validOnly = Array.from(newFiles).filter((f) => ALLOWED_IMAGE_TYPES.includes(f.type));
+    const combined = [...files, ...validOnly].slice(0, MAX_MEDIA);
     setFiles(combined);
   }
 
@@ -47,6 +52,8 @@ function NominateFormInner() {
     setError(null);
 
     if (!form.categoryId) return setError("Please choose a category.");
+    if (!form.submitterEmail.trim()) return setError("Please enter your email.");
+    if (!form.submitterPhone.trim()) return setError("Please enter your phone number.");
 
     setSubmitting(true);
     const body = new FormData();
@@ -126,12 +133,12 @@ function NominateFormInner() {
       </div>
 
       <div>
-        <label className="text-xs text-ink/50 block mb-1">Photos or a short video (optional, up to {MAX_MEDIA})</label>
-        <p className="text-[11px] text-ink/40 mb-2">3-6 photos of what they do, and/or one short video (~20 seconds).</p>
+        <label className="text-xs text-ink/50 block mb-1">Photo or logo (optional, up to {MAX_MEDIA})</label>
+        <p className="text-[11px] text-ink/40 mb-2">Up to {MAX_MEDIA} photos — a headshot, or a brand/organization logo.</p>
         <label className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gold/30 p-6 text-center cursor-pointer hover:bg-gold/5 transition-colors ${files.length >= MAX_MEDIA ? "opacity-50 pointer-events-none" : ""}`}>
           <UploadCloud className="size-6 text-gold-deep" />
-          <span className="text-sm text-ink/60">Click to add photos or a video</span>
-          <input type="file" accept="image/*,video/*" multiple className="hidden"
+          <span className="text-sm text-ink/60">Click to add a photo or logo</span>
+          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
             onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} disabled={files.length >= MAX_MEDIA} />
         </label>
         {files.length > 0 && (
@@ -150,13 +157,13 @@ function NominateFormInner() {
 
       <div className="grid sm:grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-ink/50 block mb-1">Your email (optional)</label>
-          <input type="email" value={form.submitterEmail} onChange={(e) => setForm((f) => ({ ...f, submitterEmail: e.target.value }))}
+          <label className="text-xs text-ink/50 block mb-1">Your email *</label>
+          <input required type="email" value={form.submitterEmail} onChange={(e) => setForm((f) => ({ ...f, submitterEmail: e.target.value }))}
             placeholder="In case we need to reach you" className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm" />
         </div>
         <div>
-          <label className="text-xs text-ink/50 block mb-1">Your phone (optional)</label>
-          <input value={form.submitterPhone} onChange={(e) => setForm((f) => ({ ...f, submitterPhone: e.target.value }))}
+          <label className="text-xs text-ink/50 block mb-1">Your phone *</label>
+          <input required value={form.submitterPhone} onChange={(e) => setForm((f) => ({ ...f, submitterPhone: e.target.value }))}
             placeholder="e.g. 0712345678" className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm" />
         </div>
       </div>
