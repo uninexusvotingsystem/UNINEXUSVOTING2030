@@ -46,11 +46,23 @@ export function clientIp(request: Request) {
 
 export async function enforceRateLimit(limiter: Ratelimit | null, key: string) {
   if (!limiter) return null;
-  const { success, reset } = await limiter.limit(key);
-  if (success) return null;
-  const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
-  return new Response(JSON.stringify({ error: "Too many requests. Please try again shortly." }), {
-    status: 429,
-    headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
-  });
+
+  // Fail OPEN, not closed. If Upstash is unreachable, misconfigured, or
+  // just slow, a real submission should still go through — losing rate
+  // limiting for a few minutes is a much smaller problem than every
+  // nomination, vote, or OTP request in the country getting a 500.
+  // The error is still logged so an outage like this is visible and
+  // fixable, instead of silently masked.
+  try {
+    const { success, reset } = await limiter.limit(key);
+    if (success) return null;
+    const retryAfter = Math.max(1, Math.ceil((reset - Date.now()) / 1000));
+    return new Response(JSON.stringify({ error: "Too many requests. Please try again shortly." }), {
+      status: 429,
+      headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+    });
+  } catch (err) {
+    console.error("[rate-limit] Redis unavailable, failing open:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
