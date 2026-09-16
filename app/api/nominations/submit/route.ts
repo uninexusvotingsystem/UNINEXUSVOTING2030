@@ -1,11 +1,24 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { nominationSubmitLimiter, enforceRateLimit, clientIp } from "@/lib/rate-limit";
 import { enforceCors } from "@/lib/cors";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import { sendNewNominationAlertEmail } from "@/lib/resend";
 import * as Sentry from "@sentry/nextjs";
+
+// R2 is S3-compatible, so the standard AWS SDK talks to it directly —
+// just pointed at Cloudflare's endpoint instead of AWS's.
+const r2 = new S3Client({
+  region: "auto",
+  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+});
+const R2_BUCKET = "nominee-media";
 
 const MAX_MEDIA_ITEMS = 2;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB
@@ -147,13 +160,19 @@ export async function POST(request: Request) {
           const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
           const bytes = new Uint8Array(await file.arrayBuffer());
 
-          const { error: uploadErr } = await supabase.storage.from("nominee-media").upload(path, bytes, { contentType: file.type });
-          if (uploadErr) throw uploadErr;
+          await r2.send(
+            new PutObjectCommand({
+              Bucket: R2_BUCKET,
+              Key: path,
+              Body: bytes,
+              ContentType: file.type,
+            })
+          );
 
-          const { data: pub } = supabase.storage.from("nominee-media").getPublicUrl(path);
+          const publicUrl = `${process.env.R2_PUBLIC_URL}/${path}`;
           const { error: mediaInsertErr } = await supabase.from("nominee_media").insert({
             nominee_id: nominee.id,
-            media_url: pub.publicUrl,
+            media_url: publicUrl,
             media_type: "image",
             sort_order: index,
           });
