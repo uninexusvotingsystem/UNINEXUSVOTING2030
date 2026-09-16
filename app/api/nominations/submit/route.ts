@@ -7,16 +7,16 @@ import { verifyTurnstileToken } from "@/lib/turnstile";
 import { sendNewNominationAlertEmail } from "@/lib/resend";
 import * as Sentry from "@sentry/nextjs";
 
-const MAX_MEDIA_ITEMS = 6;
+const MAX_MEDIA_ITEMS = 2;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB
-const MAX_VIDEO_BYTES = 25 * 1024 * 1024; // 25MB
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const fieldsSchema = z.object({
   name: z.string().trim().min(2).max(120),
   categoryId: z.string().uuid(),
   about: z.string().trim().min(10).max(600),
-  submitterEmail: z.string().trim().email().optional().or(z.literal("")),
-  submitterPhone: z.string().trim().max(20).optional().or(z.literal("")),
+  submitterEmail: z.string().trim().email("Please enter a valid email address."),
+  submitterPhone: z.string().trim().min(7, "Please enter a valid phone number.").max(20),
   website: z.string().optional().or(z.literal("")),
 });
 
@@ -81,25 +81,18 @@ export async function POST(request: Request) {
     const files = formData.getAll("media").filter((f): f is File => f instanceof File && f.size > 0);
 
     if (files.length > MAX_MEDIA_ITEMS) {
-      return NextResponse.json({ error: `Please upload at most ${MAX_MEDIA_ITEMS} media items.` }, { status: 400 });
-    }
-
-    const videoFiles = files.filter((f) => f.type.startsWith("video/"));
-    if (videoFiles.length > 1) {
-      return NextResponse.json({ error: "Only one video is allowed per nomination." }, { status: 400 });
+      return NextResponse.json({ error: `Please upload at most ${MAX_MEDIA_ITEMS} photos.` }, { status: 400 });
     }
 
     for (const file of files) {
-      const isImage = file.type.startsWith("image/");
-      const isVideo = file.type.startsWith("video/");
-      if (!isImage && !isVideo) {
-        return NextResponse.json({ error: `"${file.name}" isn't an image or video file.` }, { status: 400 });
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        return NextResponse.json(
+          { error: `"${file.name}" isn't a supported photo format. Please upload a JPEG, PNG, or WEBP photo or logo.` },
+          { status: 400 }
+        );
       }
-      if (isImage && file.size > MAX_IMAGE_BYTES) {
+      if (file.size > MAX_IMAGE_BYTES) {
         return NextResponse.json({ error: `"${file.name}" is too large — please keep photos under 8MB.` }, { status: 400 });
-      }
-      if (isVideo && file.size > MAX_VIDEO_BYTES) {
-        return NextResponse.json({ error: `"${file.name}" is too large for a ~20 second clip — please compress it.` }, { status: 400 });
       }
     }
 
@@ -116,8 +109,8 @@ export async function POST(request: Request) {
         category_id: categoryId,
         name,
         about,
-        submitter_email: submitterEmail || null,
-        submitter_phone: submitterPhone || null,
+        submitter_email: submitterEmail,
+        submitter_phone: submitterPhone,
         status: "pending",
       })
       .select("id")
@@ -136,15 +129,14 @@ export async function POST(request: Request) {
     }
 
     // Media uploads run in parallel rather than one-at-a-time — with the
-    // maximum of 6 items, a sequential loop meant a nomination with several
-    // photos plus a video could take several times longer to finish than one
-    // with just text, for no real reason: each file's upload+DB-row insert is
-    // fully independent of the others.
+    // maximum of 2 items, a sequential loop meant a nomination with two
+    // photos could take twice as long to finish than one with just text,
+    // for no real reason: each file's upload+DB-row insert is fully
+    // independent of the others.
     if (files.length > 0) {
       const results = await Promise.allSettled(
         files.map(async (file, index) => {
-          const isVideo = file.type.startsWith("video/");
-          const ext = file.name.split(".").pop() || (isVideo ? "mp4" : "jpg");
+          const ext = file.name.split(".").pop() || "jpg";
           const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
           const bytes = new Uint8Array(await file.arrayBuffer());
 
@@ -155,7 +147,7 @@ export async function POST(request: Request) {
           const { error: mediaInsertErr } = await supabase.from("nominee_media").insert({
             nominee_id: nominee.id,
             media_url: pub.publicUrl,
-            media_type: isVideo ? "video" : "image",
+            media_type: "image",
             sort_order: index,
           });
           if (mediaInsertErr) throw mediaInsertErr;
