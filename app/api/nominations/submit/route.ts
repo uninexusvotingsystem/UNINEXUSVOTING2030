@@ -116,6 +116,13 @@ export async function POST(request: Request) {
       .select("id")
       .single();
 
+    if (insertErr?.code === "23505") {
+      return NextResponse.json(
+        { error: "This nomination looks like a duplicate — it's already been submitted." },
+        { status: 409 }
+      );
+    }
+
     if (insertErr || !nominee) {
       // Logged with the full Supabase error (code + message + hint) rather than
       // just re-thrown generically — this is exactly the detail that tells you
