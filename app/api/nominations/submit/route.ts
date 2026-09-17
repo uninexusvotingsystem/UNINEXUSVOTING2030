@@ -9,13 +9,16 @@ import { sendNewNominationAlertEmail } from "@/lib/resend";
 import * as Sentry from "@sentry/nextjs";
 
 // R2 is S3-compatible, so the standard AWS SDK talks to it directly —
-// just pointed at Cloudflare's endpoint instead of AWS's.
+// just pointed at Cloudflare's endpoint instead of AWS's. Values are trimmed
+// defensively: a stray space or newline from a mobile copy-paste (the exact
+// bug that broke the Upstash token earlier) would otherwise produce a
+// malformed endpoint or a silently-rejected signature.
 const r2 = new S3Client({
   region: "auto",
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  endpoint: `https://${process.env.R2_ACCOUNT_ID?.trim()}.r2.cloudflarestorage.com`,
   credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    accessKeyId: (process.env.R2_ACCESS_KEY_ID ?? "").trim(),
+    secretAccessKey: (process.env.R2_SECRET_ACCESS_KEY ?? "").trim(),
   },
 });
 const R2_BUCKET = "nominee-media";
@@ -181,10 +184,15 @@ export async function POST(request: Request) {
       );
 
       // One bad file shouldn't cost the whole nomination (already-verified text
-      // is saved regardless) — but each failure is still logged individually so
-      // it's visible, not silently dropped.
+      // is saved regardless) — but each failure is now logged to console AND
+      // Sentry. Console-only visibility matters here specifically: it's what
+      // shows up in Vercel's runtime logs, which is how this exact kind of
+      // silent failure gets diagnosed without needing the Sentry dashboard.
       results.forEach((r) => {
-        if (r.status === "rejected") Sentry.captureException(r.reason);
+        if (r.status === "rejected") {
+          console.error("[nominations] media upload failed:", r.reason instanceof Error ? r.reason.message : r.reason);
+          Sentry.captureException(r.reason);
+        }
       });
     }
 
