@@ -6,6 +6,7 @@ const nextConfig = {
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.supabase.co" },
+      { protocol: "https", hostname: "*.r2.dev" },
     ],
   },
   async headers() {
@@ -25,8 +26,8 @@ const nextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: blob: https://*.supabase.co",
-              "media-src 'self' https://*.supabase.co",
+              "img-src 'self' data: blob: https://*.supabase.co https://*.r2.dev",
+              "media-src 'self' https://*.supabase.co https://*.r2.dev",
               "connect-src 'self' https://*.supabase.co",
               "frame-src 'self' https://www.google.com",
               "frame-ancestors 'none'",
