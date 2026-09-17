@@ -21,7 +21,7 @@ const r2 = new S3Client({
     secretAccessKey: (process.env.R2_SECRET_ACCESS_KEY ?? "").trim(),
   },
 });
-const R2_BUCKET = "nominee-media";
+const R2_BUCKET = "uninexus-nominees-media";
 
 const MAX_MEDIA_ITEMS = 2;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB
