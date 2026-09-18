@@ -162,7 +162,7 @@ function NominateFormInner() {
       </div>
 
       <div className="rounded-lg bg-black/[0.03] border border-black/10 p-3 text-[11px] text-ink/55 leading-relaxed">
-        Each person can only be nominated once across the entire awards — under any category, in any spelling or capitalization. If this name (or a very close spelling of it) has already been submitted, the system will decline this nomination automatically.
+        Each name can only be nominated once per category — in any spelling or capitalization, and regardless of who submits it. If this name (or a very close spelling of it) has already been submitted in this category, the system will decline the nomination automatically.
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
