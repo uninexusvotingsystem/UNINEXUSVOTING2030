@@ -1,85 +1,223 @@
-import Link from "next/link";
-import Image from "next/image";
-import { ArrowRight, Trophy, UserPlus, Ticket } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+"use client";
+
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Script from "next/script";
+import { createClient } from "@/lib/supabase/client";
+import { Loader2, UploadCloud, X, CheckCircle2 } from "lucide-react";
 import { SiteFooter } from "@/components/site-footer";
-import { MAIN_SITE_URL, GALA_TICKETS_URL } from "@/lib/constants";
 
-async function getCategories() {
-  const supabase = createClient();
-  const { data } = await supabase.from("categories").select("*").order("sort_order", { ascending: true });
-  return data || [];
-}
+const MAX_MEDIA = 2;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
-export default async function HomePage() {
-  const categories = await getCategories();
+function NominateFormInner() {
+  const searchParams = useSearchParams();
+  const [categories, setCategories] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: "", categoryId: "", about: "", submitterEmail: "", submitterPhone: "" });
+  const [files, setFiles] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.from("categories").select("*").eq("nominations_open", true).order("sort_order", { ascending: true }).then(({ data }) => {
+      setCategories(data || []);
+      const preselect = searchParams.get("category");
+      if (preselect && data) {
+        const match = data.find((c: any) => c.slug === preselect);
+        if (match) setForm((f) => ({ ...f, categoryId: match.id }));
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function addFiles(newFiles: FileList | null) {
+    if (!newFiles) return;
+    // Silently drop anything that isn't an allowed image type (e.g. video) —
+    // the accept attribute on the input already steers people away from this,
+    // but a filter here catches drag-and-drop and other paths around it.
+    const validOnly = Array.from(newFiles).filter((f) => ALLOWED_IMAGE_TYPES.includes(f.type));
+    const combined = [...files, ...validOnly].slice(0, MAX_MEDIA);
+    setFiles(combined);
+  }
+
+  function removeFile(index: number) {
+    setFiles((f) => f.filter((_, i) => i !== index));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (!form.categoryId) return setError("Please choose a category.");
+    if (!form.submitterEmail.trim()) return setError("Please enter your email.");
+    if (!form.submitterPhone.trim()) return setError("Please enter your phone number.");
+    if (files.length === 0) return setError("Please upload a photo — it's required as the nominee's profile photo during voting.");
+
+    setSubmitting(true);
+    const body = new FormData();
+    body.set("name", form.name);
+    body.set("categoryId", form.categoryId);
+    body.set("about", form.about);
+    body.set("submitterEmail", form.submitterEmail);
+    body.set("submitterPhone", form.submitterPhone);
+    // Honeypot — left blank by real visitors, sometimes filled by bots.
+    body.set("website", "");
+    files.forEach((f) => body.append("media", f));
+
+    try {
+      // Turnstile injects a hidden input with this name inside its widget div
+      // once the visitor passes the challenge. Since this FormData is built
+      // field-by-field rather than from the <form> element directly, it has to
+      // be read and appended explicitly.
+      const turnstileInput = document.querySelector<HTMLInputElement>('input[name="cf-turnstile-response"]');
+      if (TURNSTILE_SITE_KEY) {
+        if (!turnstileInput?.value) {
+          setError("Please complete the verification check before submitting.");
+          setSubmitting(false);
+          return;
+        }
+        body.set("turnstileToken", turnstileInput.value);
+      }
+
+      const res = await fetch("/api/nominations/submit", { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Couldn't submit your nomination. Please try again.");
+        setSubmitting(false);
+        return;
+      }
+      setDone(true);
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
+      setSubmitting(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="card-elegant p-10 text-center max-w-lg mx-auto">
+        <CheckCircle2 className="size-10 text-emerald-600 mx-auto mb-4" />
+        <h2 className="font-display text-2xl mb-2">Nomination received</h2>
+        <p className="text-sm text-ink/60">Thank you — this nomination will be reviewed before it appears publicly.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-cream min-h-screen flex flex-col">
-      <section className="surface-ink py-16 sm:py-24 text-center">
-        <div className="container max-w-2xl">
-          <div className="inline-block bg-cream rounded-2xl p-4 sm:p-5 shadow-[0_8px_40px_-8px_rgba(201,162,39,0.45)] mb-8">
-            <Image src="/logos/gala-logo.png" alt="UniNexus Connect Gala Awards" width={800} height={708}
-              className="w-48 sm:w-64 h-auto" priority />
+    <form onSubmit={handleSubmit} className="card-elegant p-7 sm:p-9 max-w-lg mx-auto space-y-4">
+      <p className="text-[12px] text-ink/50 text-center -mt-1 mb-1">
+        Need help with your nomination? Call <a href="tel:+254718547198" className="text-gold-deep font-medium">+254 718 547198</a> or email{" "}
+        <a href="mailto:uninexusplatformke@gmail.com" className="text-gold-deep font-medium">uninexusplatformke@gmail.com</a>
+      </p>
+
+      {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+
+      <div>
+        <label className="text-xs text-ink/50 block mb-1">Nominee&apos;s name *</label>
+        <input required value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+          className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm" />
+      </div>
+
+      <div>
+        <label className="text-xs text-ink/50 block mb-1">Category *</label>
+        <select required value={form.categoryId} onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+          className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm bg-white">
+          <option value="">Choose a category</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-xs text-ink/50 block mb-1">Why are they being nominated? (short &amp; precise) *</label>
+        <textarea required rows={4} maxLength={600} value={form.about} onChange={(e) => setForm((f) => ({ ...f, about: e.target.value }))}
+          placeholder="A few sentences on what they do and why they deserve this nomination."
+          className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm resize-none" />
+        <p className="text-[11px] text-ink/35 mt-1">{form.about.length}/600</p>
+      </div>
+
+      <div>
+        <label className="text-xs text-ink/50 block mb-1">Photo or logo * (required, up to {MAX_MEDIA})</label>
+        <p className="text-[11px] text-ink/40 mb-2">Required — a clear photo of the nominee, or a brand/organization logo. This will be used as their profile photo during voting.</p>
+        <label className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gold/30 p-6 text-center cursor-pointer hover:bg-gold/5 transition-colors ${files.length >= MAX_MEDIA ? "opacity-50 pointer-events-none" : ""}`}>
+          <UploadCloud className="size-6 text-gold-deep" />
+          <span className="text-sm text-ink/60">Click to add a photo or logo</span>
+          <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+            onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} disabled={files.length >= MAX_MEDIA} />
+        </label>
+        {files.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            {files.map((f, i) => (
+              <div key={i} className="relative rounded-lg overflow-hidden border border-black/10 bg-black/5 aspect-square flex items-center justify-center">
+                <span className="text-[10px] text-ink/50 text-center px-1 truncate">{f.name}</span>
+                <button type="button" onClick={() => removeFile(i)} className="absolute top-1 right-1 size-5 rounded-full bg-black/70 text-white flex items-center justify-center">
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
           </div>
-          <h1 className="heading-display text-4xl sm:text-6xl text-cream mb-5">Nominate. Vote. Celebrate.</h1>
-          <p className="text-cream/65 leading-relaxed">
-            Recognizing and honouring the leaders, founders, creative talents, entrepreneurs, innovators, and changemakers shaping the future of Kenya&apos;s campuses, colleges &amp; education institutions.
-          </p>
-        </div>
-      </section>
+        )}
+      </div>
 
-      <section className="container py-14 sm:py-20 flex-1">
-        <div className="grid gap-5">
-          {categories.map((c) => (
-            <div key={c.id} className="card-elegant p-7 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h2 className="font-display text-2xl mb-1">{c.name}</h2>
-                {c.description && <p className="text-sm text-ink/60 max-w-xl">{c.description}</p>}
-                <p className="text-xs uppercase tracking-wider text-gold-deep mt-2">
-                  {c.nominations_open && "Nominations open"}
-                  {c.nominations_open && c.voting_open && " · "}
-                  {c.voting_open && "Voting open"}
-                  {!c.nominations_open && !c.voting_open && "Closed"}
-                </p>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                {c.nominations_open && (
-                  <Link href={`/nominate?category=${c.slug}`} className="btn-outline-gold !py-2.5 !px-5 text-sm">
-                    <UserPlus className="size-4" /> Nominate
-                  </Link>
-                )}
-                {c.voting_open && (
-                  <Link href={`/vote/${c.slug}`} className="btn-gold !py-2.5 !px-5 text-sm">
-                    <Trophy className="size-4" /> Vote
-                  </Link>
-                )}
-              </div>
-            </div>
-          ))}
-          {categories.length === 0 && (
-            <div className="card-elegant p-10 text-center text-ink/50">Categories are being set up — check back soon.</div>
-          )}
-        </div>
+      <div className="rounded-lg bg-black/[0.03] border border-black/10 p-3 text-[11px] text-ink/55 leading-relaxed">
+        Each name can only be nominated once per category. If someone has already been nominated under this name — in any combination of upper or lower case — the system will decline the submission automatically.
+      </div>
 
-        <div className="mt-14 card-elegant p-8 text-center max-w-xl mx-auto">
-          <h3 className="font-display text-xl mb-2">Attending the Gala?</h3>
-          <p className="text-sm text-ink/60 mb-4">Get your tickets to the UniNexus Connect Gala Awards — this year's winners are announced live.</p>
-          <a href={GALA_TICKETS_URL} target="_blank" rel="noreferrer" className="btn-gold inline-flex !py-3 !px-6">
-            <Ticket className="size-4" /> Buy tickets
-          </a>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-ink/50 block mb-1">Your email *</label>
+          <input required type="email" value={form.submitterEmail} onChange={(e) => setForm((f) => ({ ...f, submitterEmail: e.target.value }))}
+            placeholder="In case we need to reach you" className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm" />
         </div>
-
-        <div className="mt-6 card-elegant p-8 text-center max-w-xl mx-auto">
-          <h3 className="font-display text-xl mb-2">Not a UniNexus Connect member yet?</h3>
-          <p className="text-sm text-ink/60 mb-4">Join UniNexus Connect to follow every event, category and update across Kenyan universities.</p>
-          <a href={`${MAIN_SITE_URL}/auth`} className="btn-gold inline-flex !py-3 !px-6">
-            Join UniNexus Connect <ArrowRight className="size-4" />
-          </a>
+        <div>
+          <label className="text-xs text-ink/50 block mb-1">Your phone *</label>
+          <input required value={form.submitterPhone} onChange={(e) => setForm((f) => ({ ...f, submitterPhone: e.target.value }))}
+            placeholder="e.g. 0712345678" className="w-full rounded-lg border border-black/10 px-3 py-2.5 text-sm" />
         </div>
-      </section>
+      </div>
 
-      <SiteFooter />
+      {/* Honeypot field — hidden from real visitors via CSS, not `type="hidden"`
+          (some bots skip type=hidden inputs specifically, but not off-screen ones). */}
+      <input
+        type="text"
+        name="website"
+        tabIndex={-1}
+        autoComplete="off"
+        className="absolute -left-[9999px] w-px h-px opacity-0"
+        onChange={(e) => setForm((f) => ({ ...f, website: e.target.value } as any))}
+      />
+
+      {TURNSTILE_SITE_KEY && (
+        <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="light" />
+      )}
+
+      <button type="submit" disabled={submitting} className="btn-gold w-full !py-3.5 disabled:opacity-60">
+        {submitting ? <Loader2 className="size-4 animate-spin" /> : "Submit nomination"}
+      </button>
+    </form>
+  );
+}
+
+export default function NominatePage() {
+  return (
+    <div className="bg-cream min-h-screen py-14 sm:py-20">
+      {TURNSTILE_SITE_KEY && (
+        <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />
+      )}
+      <div className="container">
+        <div className="text-center mb-10">
+          <p className="eyebrow mb-3">Nominate someone</p>
+          <h1 className="heading-display text-3xl sm:text-4xl">Tell us who deserves recognition</h1>
+        </div>
+        <Suspense fallback={null}>
+          <NominateFormInner />
+        </Suspense>
+      </div>
+      <div className="mt-14">
+        <SiteFooter />
+      </div>
     </div>
   );
 }
