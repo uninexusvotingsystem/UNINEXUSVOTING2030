@@ -139,11 +139,11 @@ export async function POST(request: Request) {
       .select("id")
       .single();
 
-    if (insertErr?.code === "23505") {
+    if (insertErr?.code === "P0001" && insertErr.message?.includes("DUPLICATE_NOMINEE_NAME")) {
       return NextResponse.json(
         {
           error:
-            "This person has already been nominated in this category. Each name can only be nominated once. If you believe this is a mistake, contact us at +254 718 547198 or uninexusplatformke@gmail.com.",
+            "This person has already been nominated (in this or another category) and can't be nominated again under the same or a very similar name. If you believe this is a mistake, contact us at +254 718 547198 or uninexusplatformke@gmail.com.",
         },
         { status: 409 }
       );
