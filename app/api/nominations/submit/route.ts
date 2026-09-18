@@ -96,6 +96,13 @@ export async function POST(request: Request) {
 
     const files = formData.getAll("media").filter((f): f is File => f instanceof File && f.size > 0);
 
+    if (files.length === 0) {
+      return NextResponse.json(
+        { error: "A photo is required — it will be used as the nominee's profile photo during voting." },
+        { status: 400 }
+      );
+    }
+
     if (files.length > MAX_MEDIA_ITEMS) {
       return NextResponse.json({ error: `Please upload at most ${MAX_MEDIA_ITEMS} photos.` }, { status: 400 });
     }
@@ -134,7 +141,10 @@ export async function POST(request: Request) {
 
     if (insertErr?.code === "23505") {
       return NextResponse.json(
-        { error: "This nomination looks like a duplicate — it's already been submitted." },
+        {
+          error:
+            "This person has already been nominated in this category. Each name can only be nominated once. If you believe this is a mistake, contact us at +254 718 547198 or uninexusplatformke@gmail.com.",
+        },
         { status: 409 }
       );
     }
@@ -156,44 +166,52 @@ export async function POST(request: Request) {
     // photos could take twice as long to finish than one with just text,
     // for no real reason: each file's upload+DB-row insert is fully
     // independent of the others.
-    if (files.length > 0) {
-      const results = await Promise.allSettled(
-        files.map(async (file, index) => {
-          const ext = file.name.split(".").pop() || "jpg";
-          const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
-          const bytes = new Uint8Array(await file.arrayBuffer());
+    const results = await Promise.allSettled(
+      files.map(async (file, index) => {
+        const ext = file.name.split(".").pop() || "jpg";
+        const path = `${nominee.id}/${crypto.randomUUID()}.${ext}`;
+        const bytes = new Uint8Array(await file.arrayBuffer());
 
-          await r2.send(
-            new PutObjectCommand({
-              Bucket: R2_BUCKET,
-              Key: path,
-              Body: bytes,
-              ContentType: file.type,
-            })
-          );
+        await r2.send(
+          new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: path,
+            Body: bytes,
+            ContentType: file.type,
+          })
+        );
 
-          const publicUrl = `${process.env.R2_PUBLIC_URL}/${path}`;
-          const { error: mediaInsertErr } = await supabase.from("nominee_media").insert({
-            nominee_id: nominee.id,
-            media_url: publicUrl,
-            media_type: "image",
-            sort_order: index,
-          });
-          if (mediaInsertErr) throw mediaInsertErr;
-        })
+        const publicUrl = `${process.env.R2_PUBLIC_URL}/${path}`;
+        const { error: mediaInsertErr } = await supabase.from("nominee_media").insert({
+          nominee_id: nominee.id,
+          media_url: publicUrl,
+          media_type: "image",
+          sort_order: index,
+        });
+        if (mediaInsertErr) throw mediaInsertErr;
+      })
+    );
+
+    // One bad file shouldn't cost the whole nomination if at least one photo
+    // made it through — but if EVERY upload failed, the nominee would be left
+    // with no photo at all, which isn't allowed now that a photo is required.
+    // Roll back the row so the name frees up and the person can cleanly retry,
+    // instead of leaving a photo-less nomination permanently occupying this
+    // category's unique-name slot.
+    const succeeded = results.filter((r) => r.status === "fulfilled").length;
+    results.forEach((r) => {
+      if (r.status === "rejected") {
+        console.error("[nominations] media upload failed:", r.reason instanceof Error ? r.reason.message : r.reason);
+        Sentry.captureException(r.reason);
+      }
+    });
+
+    if (succeeded === 0) {
+      await supabase.from("nominees").delete().eq("id", nominee.id);
+      return NextResponse.json(
+        { error: "Your photo couldn't be uploaded, so the nomination wasn't saved. Please try again." },
+        { status: 500 }
       );
-
-      // One bad file shouldn't cost the whole nomination (already-verified text
-      // is saved regardless) — but each failure is now logged to console AND
-      // Sentry. Console-only visibility matters here specifically: it's what
-      // shows up in Vercel's runtime logs, which is how this exact kind of
-      // silent failure gets diagnosed without needing the Sentry dashboard.
-      results.forEach((r) => {
-        if (r.status === "rejected") {
-          console.error("[nominations] media upload failed:", r.reason instanceof Error ? r.reason.message : r.reason);
-          Sentry.captureException(r.reason);
-        }
-      });
     }
 
     try {
