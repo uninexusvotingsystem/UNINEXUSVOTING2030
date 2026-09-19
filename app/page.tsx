@@ -11,6 +11,14 @@ const MAX_MEDIA = 2;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
+// Categories rarely change mid-campaign, but without this every single visit
+// to this page — including resetting the form after a submission — pays for
+// a fresh Supabase round trip just to redraw a dropdown that almost
+// certainly hasn't changed. A short client-side cache means only the FIRST
+// load in a browsing session waits on that network call.
+const CATEGORIES_CACHE_KEY = "unx_categories_cache_v1";
+const CATEGORIES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 function NominateFormInner() {
   const searchParams = useSearchParams();
   const [categories, setCategories] = useState<any[]>([]);
@@ -18,16 +26,43 @@ function NominateFormInner() {
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDuplicateError, setIsDuplicateError] = useState(false);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.from("categories").select("*").eq("nominations_open", true).order("sort_order", { ascending: true }).then(({ data }) => {
-      setCategories(data || []);
-      const preselect = searchParams.get("category");
-      if (preselect && data) {
+    const preselect = searchParams.get("category");
+
+    function applyCategories(data: any[]) {
+      setCategories(data);
+      if (preselect) {
         const match = data.find((c: any) => c.slug === preselect);
         if (match) setForm((f) => ({ ...f, categoryId: match.id }));
+      }
+    }
+
+    // Serve from cache first if it's fresh enough — private browsing or a
+    // cleared cache just falls through to the normal network fetch below.
+    try {
+      const cached = sessionStorage.getItem(CATEGORIES_CACHE_KEY);
+      if (cached) {
+        const { data, cachedAt } = JSON.parse(cached);
+        if (Date.now() - cachedAt < CATEGORIES_CACHE_TTL_MS && Array.isArray(data)) {
+          applyCategories(data);
+          return;
+        }
+      }
+    } catch {
+      // sessionStorage unavailable — proceed to fetch normally
+    }
+
+    const supabase = createClient();
+    supabase.from("categories").select("*").eq("nominations_open", true).order("sort_order", { ascending: true }).then(({ data }) => {
+      const list = data || [];
+      applyCategories(list);
+      try {
+        sessionStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify({ data: list, cachedAt: Date.now() }));
+      } catch {
+        // storage full or unavailable — not worth failing the page over
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -50,6 +85,7 @@ function NominateFormInner() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setIsDuplicateError(false);
 
     if (!form.categoryId) return setError("Please choose a category.");
     if (!form.submitterEmail.trim()) return setError("Please enter your email.");
@@ -86,6 +122,7 @@ function NominateFormInner() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || "Couldn't submit your nomination. Please try again.");
+        setIsDuplicateError(res.status === 409);
         setSubmitting(false);
         return;
       }
@@ -100,8 +137,8 @@ function NominateFormInner() {
     return (
       <div className="card-elegant p-10 text-center max-w-lg mx-auto">
         <CheckCircle2 className="size-10 text-emerald-600 mx-auto mb-4" />
-        <h2 className="font-display text-2xl mb-2">Nomination received</h2>
-        <p className="text-sm text-ink/60">Thank you — this nomination will be reviewed before it appears publicly.</p>
+        <h2 className="font-display text-2xl mb-2">Nomination Successfully Submitted</h2>
+        <p className="text-sm text-ink/60">Thank you for your nomination. Your submission has been received and is now pending review and verification before being published for public voting.</p>
       </div>
     );
   }
@@ -113,7 +150,23 @@ function NominateFormInner() {
         <a href="mailto:uninexusplatformke@gmail.com" className="text-gold-deep font-medium">uninexusplatformke@gmail.com</a>
       </p>
 
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+      {error && isDuplicateError && (
+        <div className="rounded-lg bg-red-50 border-2 border-red-300 p-4 text-sm text-red-800">
+          <p className="font-semibold text-red-900 mb-1.5">Nominee Already Submitted</p>
+          <p className="mb-2">This nominee has already been nominated in this category. Each nominee may only be nominated once per category.</p>
+          <p>
+            If you believe this is an error,{" "}
+            <a href="https://wa.me/254718547198" target="_blank" rel="noopener noreferrer" className="underline font-medium">WhatsApp</a>
+            {" "}or{" "}
+            <a href="tel:+254718547198" className="underline font-medium">call</a>
+            {" "}+254 718 547 198, or email{" "}
+            <a href="mailto:uninexusplatformke@gmail.com" className="underline font-medium">uninexusplatformke@gmail.com</a>.
+          </p>
+        </div>
+      )}
+      {error && !isDuplicateError && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+      )}
 
       <div>
         <label className="text-xs text-ink/50 block mb-1">Nominee&apos;s name *</label>
