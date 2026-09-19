@@ -143,7 +143,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "This person has already been nominated in this category. Each name (including similar spellings) can only be nominated once per category. If you believe this is a mistake, contact us at +254 718 547198 or uninexusplatformke@gmail.com.",
+            "This nominee has already been nominated in this category. Each nominee may only be nominated once per category. If you believe this is an error, WhatsApp or call +254 718 547 198, or email uninexusplatformke@gmail.com.",
         },
         { status: 409 }
       );
