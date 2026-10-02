@@ -16,9 +16,10 @@ can never affect the main site's members, tickets, or payments.
    target shortlist (e.g. ~10 nominees) here.
 3. **Voting phase** — once a category's shortlist is ready, open voting for
    it (Admin → Categories → "Voting: Open"). Share the vote link. Voters
-   verify with a phone OTP (via Africa's Talking SMS) before their vote
-   counts — one phone number, one vote, per category, enforced by a database
-   constraint (not just app logic, so it can't be raced or bypassed).
+   verify with a phone OTP (via Celcom Africa SMS) before their vote
+   counts — up to 8 votes per phone number, per category (across any
+   nominee, in any distribution), enforced by a database trigger (not just
+   app logic, so it can't be raced or bypassed).
 4. **Results** — toggle "Results: Public" on a category once you want the
    live tally visible.
 
@@ -42,10 +43,12 @@ can never affect the main site's members, tickets, or payments.
 - Update `NEXT_PUBLIC_SITE_URL` to match your real domain once connected,
   and redeploy.
 
-### 3. Africa's Talking
-- Use a **live** account (not `sandbox`) so OTP codes actually reach real
-  phone numbers — see `AFRICASTALKING_USERNAME`.
-- Make sure the account has real SMS credit loaded.
+### 3. Celcom Africa
+- Get your API key and Partner ID from the Celcom dashboard ("GET API KEY &
+  PARTNER ID") — these are two separate values, both required.
+- Confirm your sender ID shows as **Active**, not Pending, under Sender IDs.
+- Load enough SMS credit to cover expected voting volume before going live —
+  see `CELCOM_PARTNER_ID`, `CELCOM_API_KEY`, `CELCOM_SENDER_ID`.
 
 ### 4. Upstash Redis
 - Free tier is enough to start. Without this configured, rate limiting on
@@ -103,11 +106,15 @@ redeploy needed. Seeded with the launch message by migration `0003`.
   `next.config.mjs`.
 - Cloudflare Turnstile guards BOTH the nomination form and the OTP request
   step. The OTP one matters most: every code sent costs you real SMS money,
-  so without it a script could drain your Africa's Talking balance just by
-  requesting codes in a loop.
+  so without it a script could drain your Celcom Africa balance just by
+  requesting codes in a loop. A still-valid, unexpired code is also reused
+  automatically for a voter's 2nd-8th vote in the same category, so a full
+  8-vote session only ever costs one SMS.
 - Layered rate limiting, all per-IP: a global ceiling across every API route
-  (120/min), a burst limit on voting and OTP requests (5/min), and slower
-  sustained limits on top (40 votes/hr, 3 OTPs per phone per 15 min). The
+  (120/min), a burst limit on voting and OTP requests (10/min — raised from
+  5/min so a real voter casting all 8 of their own votes quickly isn't
+  throttled), and slower sustained limits on top (80 votes/hr, 3 OTPs per
+  phone per 15 min). The
   burst limits are what actually catch scripted mass-voting, while the
   sustained limits stay generous enough for a whole campus sharing one IP.
 - **All of the above depends on `UPSTASH_REDIS_REST_URL` and
