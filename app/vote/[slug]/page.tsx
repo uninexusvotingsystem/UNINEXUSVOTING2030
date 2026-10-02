@@ -1,4 +1,11 @@
 import { notFound } from "next/navigation";
+
+// Serves this page from a brief cache instead of hitting Supabase fresh on
+// every single visit — meaningful under real voting-night traffic, where
+// many people load the same category page within seconds of each other.
+// 15s is short enough that a newly-approved nominee or a just-closed voting
+// window still appears almost immediately.
+export const revalidate = 15;
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft, ArrowRight, Ticket } from "lucide-react";

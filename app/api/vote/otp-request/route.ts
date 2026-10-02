@@ -60,14 +60,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Voting isn't open for this category." }, { status: 400 });
     }
 
-    const { data: existingVote } = await supabase
+    // Up to 8 votes per phone per category are allowed (across any nominee,
+    // in any distribution) — the real, unbypassable enforcement of this is a
+    // database trigger on the votes table, not this check. This is just the
+    // early, cheap rejection so someone who's already used all 8 doesn't get
+    // sent another SMS (which costs real money) only to be blocked at the
+    // final vote-cast step anyway.
+    const VOTE_LIMIT = 8;
+    const { count: votesSoFar } = await supabase
       .from("votes")
+      .select("id", { count: "exact", head: true })
+      .eq("category_id", categoryId)
+      .eq("phone_hash", phoneHash);
+
+    if ((votesSoFar ?? 0) >= VOTE_LIMIT) {
+      return NextResponse.json(
+        { error: `This phone number has already used all ${VOTE_LIMIT} votes allowed in this category.` },
+        { status: 409 }
+      );
+    }
+
+    // If a still-valid, not-yet-expired code already exists for this phone +
+    // category (e.g. a voter requesting their 2nd-8th vote within the same
+    // 5-minute window, or a page refresh after already receiving a code),
+    // reuse it instead of sending another SMS. Saves real SMS cost and is
+    // safe: the code is still checked for expiry at vote-cast time regardless.
+    const { data: existingOtp } = await supabase
+      .from("otp_codes")
       .select("id")
       .eq("category_id", categoryId)
       .eq("phone_hash", phoneHash)
+      .eq("consumed", false)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
-    if (existingVote) {
-      return NextResponse.json({ error: "This phone number has already voted in this category." }, { status: 409 });
+
+    if (existingOtp) {
+      return NextResponse.json({ ok: true });
     }
 
     const code = generateOtpCode();

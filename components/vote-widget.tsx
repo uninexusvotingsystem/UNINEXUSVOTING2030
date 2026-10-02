@@ -12,7 +12,8 @@ type Nominee = {
   about: string;
   media?: { id: string; media_url: string; media_type: "image" | "video" }[];
 };
-type Step = "choose" | "phone" | "code" | "done";
+const VOTE_LIMIT = 8;
+type Step = "choose" | "phone" | "code" | "limit";
 
 export function VoteWidget({ categoryId, nominees }: { categoryId: string; nominees: Nominee[] }) {
   const [step, setStep] = useState<Step>("choose");
@@ -21,11 +22,25 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Votes already cast by this phone in this category, and whether a verified
+  // phone+code pair is currently held so a 2nd-8th vote can skip straight
+  // past the phone/OTP steps instead of asking the voter to re-verify (and
+  // without sending another SMS) for every single vote.
+  const [votesUsed, setVotesUsed] = useState(0);
+  const [verified, setVerified] = useState(false);
+  const [lastVotedName, setLastVotedName] = useState<string | null>(null);
 
   function choose(n: Nominee) {
     setSelected(n);
-    setStep("phone");
     setError(null);
+    setLastVotedName(null);
+    // Already verified from an earlier vote this session — skip straight to
+    // casting instead of re-asking for phone + OTP.
+    if (verified && phone && code) {
+      void castVote(n);
+    } else {
+      setStep("phone");
+    }
   }
 
   async function sendCode(e: React.FormEvent) {
@@ -59,20 +74,41 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
     }
   }
 
-  async function confirmVote(e: React.FormEvent) {
-    e.preventDefault();
-    if (!selected) return;
+  async function castVote(nominee: Nominee) {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/vote/cast", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, nomineeId: selected.id, phone, code }),
+        body: JSON.stringify({ categoryId, nomineeId: nominee.id, phone, code }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Couldn't submit your vote.");
-      setStep("done");
+
+      if (!res.ok) {
+        // The code this voter was relying on no longer works (expired, or
+        // never matched) — drop back to asking for a fresh one rather than
+        // showing a dead end. A true "limit reached" response is handled
+        // below via res.ok, since the cap can also be hit via the
+        // otp-request pre-check before a vote is ever attempted.
+        const expiredOrInvalid = /expired|request a new|incorrect code/i.test(data.error || "");
+        if (expiredOrInvalid) {
+          setVerified(false);
+          setCode("");
+          setStep("phone");
+        }
+        throw new Error(data.error || "Couldn't submit your vote.");
+      }
+
+      setVerified(true);
+      setVotesUsed(data.votesUsed ?? votesUsed + 1);
+      setLastVotedName(nominee.name);
+
+      if ((data.votesRemaining ?? 0) <= 0) {
+        setStep("limit");
+      } else {
+        setStep("choose");
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -80,13 +116,21 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
     }
   }
 
-  if (step === "done") {
+  async function confirmVote(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    await castVote(selected);
+  }
+
+  if (step === "limit") {
     return (
       <div className="card-elegant p-8 text-center max-w-md mx-auto">
         <CheckCircle2 className="size-12 text-gold mx-auto mb-4" />
-        <h3 className="heading-display text-2xl mb-2">Vote confirmed</h3>
+        <h3 className="heading-display text-2xl mb-2">All votes used</h3>
         <p className="text-ink/65 text-sm">
-          Thank you for voting for <strong>{selected?.name}</strong>. Your vote for this category is locked in.
+          {lastVotedName && <>Thank you for your vote for <strong>{lastVotedName}</strong>. </>}
+          This phone number has now used all {VOTE_LIMIT} votes allowed in this category — your votes are locked in.
+          You're welcome to vote in a different category.
         </p>
       </div>
     );
@@ -127,7 +171,7 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
               {loading ? <Loader2 className="size-4 animate-spin" /> : "Send verification code"}
             </button>
             <p className="text-[11px] text-ink/40 text-center">
-              One SMS code, one vote — this number can only vote once in this category.
+              One SMS code covers up to {VOTE_LIMIT} votes — this number can cast up to {VOTE_LIMIT} total votes in this category.
             </p>
           </form>
         ) : (
@@ -159,15 +203,31 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
   }
 
   return (
-    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-      {nominees.map((n) => (
-        <NomineeCard key={n.id} nominee={n} onVote={() => choose(n)} />
-      ))}
+    <div>
+      {votesUsed > 0 && (
+        <div className="mb-5 max-w-md mx-auto flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span>
+            {lastVotedName && <>Vote recorded for <strong>{lastVotedName}</strong>. </>}
+            You have {VOTE_LIMIT - votesUsed} of {VOTE_LIMIT} votes left in this category.
+          </span>
+        </div>
+      )}
+      {error && (
+        <div className="mb-5 max-w-md mx-auto flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+          <AlertCircle className="size-4 mt-0.5 shrink-0" /> {error}
+        </div>
+      )}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {nominees.map((n) => (
+          <NomineeCard key={n.id} nominee={n} onVote={() => choose(n)} loading={loading} />
+        ))}
+      </div>
     </div>
   );
 }
 
-function NomineeCard({ nominee, onVote }: { nominee: Nominee; onVote: () => void }) {
+function NomineeCard({ nominee, onVote, loading }: { nominee: Nominee; onVote: () => void; loading?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const media = nominee.media || [];
   const cover = media.find((m) => m.media_type === "image");
@@ -202,7 +262,9 @@ function NomineeCard({ nominee, onVote }: { nominee: Nominee; onVote: () => void
         </div>
       )}
 
-      <button onClick={onVote} className="btn-gold w-full !py-2.5">Vote</button>
+      <button onClick={onVote} disabled={loading} className="btn-gold w-full !py-2.5 disabled:opacity-60">
+        {loading ? <Loader2 className="size-4 animate-spin mx-auto" /> : "Vote"}
+      </button>
     </div>
   );
 }

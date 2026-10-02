@@ -8,11 +8,11 @@ import { verifyTurnstileToken } from "@/lib/turnstile";
 import { sendNewNominationAlertEmail } from "@/lib/resend";
 import * as Sentry from "@sentry/nextjs";
 
-// R2 is S3-compatible, so the standard AWS SDK talks to it directly —
-// just pointed at Cloudflare's endpoint instead of AWS's. Values are trimmed
-// defensively: a stray space or newline from a mobile copy-paste (the exact
-// bug that broke the Upstash token earlier) would otherwise produce a
-// malformed endpoint or a silently-rejected signature.
+// R2 is S3-compatible, so the standard AWS SDK talks to it directly — just
+// pointed at Cloudflare's endpoint instead of AWS's. Values are trimmed
+// defensively: a stray space or newline from a mobile copy-paste has broken
+// an env var here before (same issue hit the Upstash token), so trimming
+// guards against a malformed endpoint or a silently-rejected signature.
 const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.R2_ACCOUNT_ID?.trim()}.r2.cloudflarestorage.com`,

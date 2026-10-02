@@ -11,6 +11,14 @@ const MAX_MEDIA = 2;
 const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
+// Categories rarely change mid-campaign, but without this every visit to
+// this page — including resetting the form after a submission — pays for a
+// fresh Supabase round trip just to redraw a dropdown that almost certainly
+// hasn't changed. A short client-side cache means only the FIRST load in a
+// browsing session waits on that network call.
+const CATEGORIES_CACHE_KEY = "unx_categories_cache_v1";
+const CATEGORIES_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 function NominateFormInner() {
   const searchParams = useSearchParams();
   const [categories, setCategories] = useState<any[]>([]);
@@ -18,16 +26,41 @@ function NominateFormInner() {
   const [files, setFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDuplicateError, setIsDuplicateError] = useState(false);
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.from("categories").select("*").eq("nominations_open", true).order("sort_order", { ascending: true }).then(({ data }) => {
-      setCategories(data || []);
-      const preselect = searchParams.get("category");
-      if (preselect && data) {
+    const preselect = searchParams.get("category");
+
+    function applyCategories(data: any[]) {
+      setCategories(data);
+      if (preselect) {
         const match = data.find((c: any) => c.slug === preselect);
         if (match) setForm((f) => ({ ...f, categoryId: match.id }));
+      }
+    }
+
+    try {
+      const cached = sessionStorage.getItem(CATEGORIES_CACHE_KEY);
+      if (cached) {
+        const { data, cachedAt } = JSON.parse(cached);
+        if (Date.now() - cachedAt < CATEGORIES_CACHE_TTL_MS && Array.isArray(data)) {
+          applyCategories(data);
+          return;
+        }
+      }
+    } catch {
+      // sessionStorage unavailable (private browsing, etc.) — fall through
+    }
+
+    const supabase = createClient();
+    supabase.from("categories").select("*").eq("nominations_open", true).order("sort_order", { ascending: true }).then(({ data }) => {
+      const list = data || [];
+      applyCategories(list);
+      try {
+        sessionStorage.setItem(CATEGORIES_CACHE_KEY, JSON.stringify({ data: list, cachedAt: Date.now() }));
+      } catch {
+        // storage full or unavailable — not worth failing the page over
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -35,9 +68,6 @@ function NominateFormInner() {
 
   function addFiles(newFiles: FileList | null) {
     if (!newFiles) return;
-    // Silently drop anything that isn't an allowed image type (e.g. video) —
-    // the accept attribute on the input already steers people away from this,
-    // but a filter here catches drag-and-drop and other paths around it.
     const validOnly = Array.from(newFiles).filter((f) => ALLOWED_IMAGE_TYPES.includes(f.type));
     const combined = [...files, ...validOnly].slice(0, MAX_MEDIA);
     setFiles(combined);
@@ -50,10 +80,12 @@ function NominateFormInner() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setIsDuplicateError(false);
 
     if (!form.categoryId) return setError("Please choose a category.");
     if (!form.submitterEmail.trim()) return setError("Please enter your email.");
     if (!form.submitterPhone.trim()) return setError("Please enter your phone number.");
+    if (files.length === 0) return setError("Please upload a photo — it's required as the nominee's profile photo during voting.");
 
     setSubmitting(true);
     const body = new FormData();
@@ -85,6 +117,7 @@ function NominateFormInner() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || "Couldn't submit your nomination. Please try again.");
+        setIsDuplicateError(res.status === 409);
         setSubmitting(false);
         return;
       }
@@ -99,15 +132,36 @@ function NominateFormInner() {
     return (
       <div className="card-elegant p-10 text-center max-w-lg mx-auto">
         <CheckCircle2 className="size-10 text-emerald-600 mx-auto mb-4" />
-        <h2 className="font-display text-2xl mb-2">Nomination received</h2>
-        <p className="text-sm text-ink/60">Thank you — this nomination will be reviewed before it appears publicly.</p>
+        <h2 className="font-display text-2xl mb-2">Nomination Successfully Submitted</h2>
+        <p className="text-sm text-ink/60">Thank you for your nomination. Your submission has been received and is now pending review and verification before being published for public voting.</p>
       </div>
     );
   }
 
   return (
     <form onSubmit={handleSubmit} className="card-elegant p-7 sm:p-9 max-w-lg mx-auto space-y-4">
-      {error && <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>}
+      <p className="text-[12px] text-ink/50 text-center -mt-1 mb-1">
+        Need help with your nomination? Call <a href="tel:+254718547198" className="text-gold-deep font-medium">+254 718 547198</a> or email{" "}
+        <a href="mailto:uninexusplatformke@gmail.com" className="text-gold-deep font-medium">uninexusplatformke@gmail.com</a>
+      </p>
+
+      {error && isDuplicateError && (
+        <div className="rounded-lg bg-red-50 border-2 border-red-300 p-4 text-sm text-red-800">
+          <p className="font-semibold text-red-900 mb-1.5">Nominee Already Submitted</p>
+          <p className="mb-2">This nominee has already been nominated in this category. Each nominee may only be nominated once per category.</p>
+          <p>
+            If you believe this is an error,{" "}
+            <a href="https://wa.me/254718547198" target="_blank" rel="noopener noreferrer" className="underline font-medium">WhatsApp</a>
+            {" "}or{" "}
+            <a href="tel:+254718547198" className="underline font-medium">call</a>
+            {" "}+254 718 547 198, or email{" "}
+            <a href="mailto:uninexusplatformke@gmail.com" className="underline font-medium">uninexusplatformke@gmail.com</a>.
+          </p>
+        </div>
+      )}
+      {error && !isDuplicateError && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+      )}
 
       <div>
         <label className="text-xs text-ink/50 block mb-1">Nominee&apos;s name *</label>
@@ -133,8 +187,8 @@ function NominateFormInner() {
       </div>
 
       <div>
-        <label className="text-xs text-ink/50 block mb-1">Photo or logo (optional, up to {MAX_MEDIA})</label>
-        <p className="text-[11px] text-ink/40 mb-2">Up to {MAX_MEDIA} photos — a headshot, or a brand/organization logo.</p>
+        <label className="text-xs text-ink/50 block mb-1">Photo or logo * (required, up to {MAX_MEDIA})</label>
+        <p className="text-[11px] text-ink/40 mb-2">Required — a clear photo of the nominee, or a brand/organization logo. This will be used as their profile photo during voting.</p>
         <label className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gold/30 p-6 text-center cursor-pointer hover:bg-gold/5 transition-colors ${files.length >= MAX_MEDIA ? "opacity-50 pointer-events-none" : ""}`}>
           <UploadCloud className="size-6 text-gold-deep" />
           <span className="text-sm text-ink/60">Click to add a photo or logo</span>
@@ -153,6 +207,10 @@ function NominateFormInner() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="rounded-lg bg-black/[0.03] border border-black/10 p-3 text-[11px] text-ink/55 leading-relaxed">
+        Each name can only be nominated once per category — in any spelling or capitalization, and regardless of who submits it. If this name (or a very close spelling of it) has already been submitted in this category, the system will decline the nomination automatically.
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">

@@ -26,13 +26,17 @@ export const otpRequestPhoneLimiter = makeLimiter(3, "15 m");
 export const otpRequestIpLimiter = makeLimiter(10, "15 m");
 export const otpVerifyLimiter = makeLimiter(8, "15 m");
 
-// Voting limits, tightened for the reality of shared connections. A whole
-// university campus, hostel, or cyber cafe can share ONE public IP, so a
-// per-IP limit has to leave room for many genuine voters — but a burst limit
-// alongside it still catches scripted mass-voting, which hits far faster than
-// any realistic crowd of people typing on phones.
-export const voteIpLimiter = makeLimiter(40, "1 h");
-export const voteBurstLimiter = makeLimiter(5, "1 m");
+// Voting limits, tightened for the reality of shared connections AND for a
+// single phone now legitimately being allowed up to 8 votes in one category
+// (previously 1). The old 5/min burst limit would have blocked a genuine
+// voter partway through casting all 8 of their own votes — raised to 10/min
+// so a real person voting quickly isn't throttled, while still catching a
+// script firing far faster than any human tapping a screen. The hourly
+// per-IP ceiling is raised proportionally for the same reason: a shared
+// campus/cyber-cafe connection now needs headroom for several people each
+// legitimately generating up to 8 vote requests per category, not just 1.
+export const voteIpLimiter = makeLimiter(80, "1 h");
+export const voteBurstLimiter = makeLimiter(10, "1 m");
 
 // A blunt per-IP ceiling across ALL API routes — the cheap first line against
 // someone simply hammering the site during voting hours. Deliberately high
@@ -48,11 +52,11 @@ export async function enforceRateLimit(limiter: Ratelimit | null, key: string) {
   if (!limiter) return null;
 
   // Fail OPEN, not closed. If Upstash is unreachable, misconfigured, or
-  // just slow, a real submission should still go through — losing rate
-  // limiting for a few minutes is a much smaller problem than every
-  // nomination, vote, or OTP request in the country getting a 500.
-  // The error is still logged so an outage like this is visible and
-  // fixable, instead of silently masked.
+  // just slow, a real submission/vote should still go through — losing
+  // rate limiting for a few minutes is a much smaller problem than every
+  // nomination or vote in the country getting a 500. The error is still
+  // logged so an outage like this is visible and fixable, not silently
+  // masked.
   try {
     const { success, reset } = await limiter.limit(key);
     if (success) return null;
