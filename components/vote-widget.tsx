@@ -10,12 +10,25 @@ type Nominee = {
   id: string;
   name: string;
   about: string;
+  vote_count?: number;
   media?: { id: string; media_url: string; media_type: "image" | "video" }[];
 };
 const VOTE_LIMIT = 8;
 type Step = "choose" | "phone" | "code" | "limit";
 
-export function VoteWidget({ categoryId, nominees }: { categoryId: string; nominees: Nominee[] }) {
+// Vote counts render ONLY when resultsPublished is true — this comes
+// straight from the category's results_published column, which only an
+// admin can flip (Admin → Categories → "Results: Public"). Nothing in this
+// component can show a tally the admin hasn't explicitly chosen to publish.
+export function VoteWidget({
+  categoryId,
+  nominees,
+  resultsPublished = false,
+}: {
+  categoryId: string;
+  nominees: Nominee[];
+  resultsPublished?: boolean;
+}) {
   const [step, setStep] = useState<Step>("choose");
   const [selected, setSelected] = useState<Nominee | null>(null);
   const [phone, setPhone] = useState("");
@@ -219,15 +232,37 @@ export function VoteWidget({ categoryId, nominees }: { categoryId: string; nomin
         </div>
       )}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {nominees.map((n) => (
-          <NomineeCard key={n.id} nominee={n} onVote={() => choose(n)} loading={loading} />
+        {/* Only reordered into a leaderboard once the admin has published
+            results for this category — otherwise nominees stay in their
+            normal sort_order, same as before. */}
+        {(resultsPublished ? [...nominees].sort((a, b) => (b.vote_count ?? 0) - (a.vote_count ?? 0)) : nominees).map((n, i) => (
+          <NomineeCard
+            key={n.id}
+            nominee={n}
+            onVote={() => choose(n)}
+            loading={loading}
+            resultsPublished={resultsPublished}
+            rank={resultsPublished ? i + 1 : undefined}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function NomineeCard({ nominee, onVote, loading }: { nominee: Nominee; onVote: () => void; loading?: boolean }) {
+function NomineeCard({
+  nominee,
+  onVote,
+  loading,
+  resultsPublished,
+  rank,
+}: {
+  nominee: Nominee;
+  onVote: () => void;
+  loading?: boolean;
+  resultsPublished?: boolean;
+  rank?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
   const media = nominee.media || [];
   const cover = media.find((m) => m.media_type === "image");
@@ -235,10 +270,32 @@ function NomineeCard({ nominee, onVote, loading }: { nominee: Nominee; onVote: (
   return (
     <div className="card-elegant p-6">
       {cover && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={cover.media_url} alt={nominee.name} className="w-full aspect-square object-cover rounded-lg mb-4" />
+        // A plain `aspect-square` class on the <img> itself depends on the
+        // browser applying `aspect-ratio` correctly before the image's own
+        // natural size is known — inconsistent in practice (a tall portrait
+        // photo or a logo can briefly, or sometimes permanently, render at
+        // its native size instead of being cropped to a square, which is
+        // exactly the "some photos look huge" issue this replaces). An
+        // explicit relative/absolute wrapper forces the crop unconditionally,
+        // regardless of the uploaded photo's original orientation.
+        <div className="relative w-full aspect-square rounded-lg mb-4 overflow-hidden bg-black/5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={cover.media_url} alt={nominee.name} className="absolute inset-0 w-full h-full object-cover" />
+          {resultsPublished && rank === 1 && (
+            <span className="absolute top-2 left-2 bg-gold text-ink text-[11px] font-semibold px-2 py-1 rounded-full shadow">
+              #1
+            </span>
+          )}
+        </div>
       )}
-      <h3 className="font-display text-lg mb-1">{nominee.name}</h3>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <h3 className="font-display text-lg">{nominee.name}</h3>
+        {resultsPublished && (
+          <span className="shrink-0 text-xs font-semibold text-gold-deep bg-gold/10 px-2 py-1 rounded-full whitespace-nowrap">
+            {nominee.vote_count ?? 0} {nominee.vote_count === 1 ? "vote" : "votes"}
+          </span>
+        )}
+      </div>
 
       <div className="mb-3">
         <p className={expanded ? "text-sm text-ink/60" : "text-sm text-ink/60 truncate"}>{nominee.about}</p>

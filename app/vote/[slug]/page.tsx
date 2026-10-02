@@ -71,7 +71,7 @@ export default async function VoteCategoryPage({ params }: { params: { slug: str
         {nominees.length === 0 ? (
           <div className="card-elegant p-10 text-center text-ink/50">Nominees for this category are coming soon.</div>
         ) : (
-          <VoteWidget categoryId={category.id} nominees={nominees} />
+          <VoteWidget categoryId={category.id} nominees={nominees} resultsPublished={category.results_published} />
         )}
 
         <div className="mt-14 card-elegant p-8 text-center max-w-xl mx-auto">
