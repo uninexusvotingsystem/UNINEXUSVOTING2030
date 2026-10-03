@@ -27,16 +27,17 @@ export const otpRequestIpLimiter = makeLimiter(10, "15 m");
 export const otpVerifyLimiter = makeLimiter(8, "15 m");
 
 // Voting limits, tightened for the reality of shared connections AND for a
-// single phone now legitimately being allowed up to 8 votes in one category
-// (previously 1). The old 5/min burst limit would have blocked a genuine
-// voter partway through casting all 8 of their own votes — raised to 10/min
-// so a real person voting quickly isn't throttled, while still catching a
-// script firing far faster than any human tapping a screen. The hourly
-// per-IP ceiling is raised proportionally for the same reason: a shared
-// campus/cyber-cafe connection now needs headroom for several people each
-// legitimately generating up to 8 vote requests per category, not just 1.
-export const voteIpLimiter = makeLimiter(80, "1 h");
-export const voteBurstLimiter = makeLimiter(10, "1 m");
+// single phone now legitimately being allowed up to 20 votes in one
+// category (previously 1, then 8). A real voter using all 20 votes quickly
+// needs enough burst headroom to do that within a minute without being
+// throttled — 25/min covers a person tapping through all 20 votes plus a
+// couple of OTP requests, while staying well under what a scripted flood
+// would attempt (20+ taps in under a second is not something a human does).
+// The hourly per-IP ceiling is raised proportionally for the same reason: a
+// shared campus/cyber-cafe connection now needs headroom for several people
+// each legitimately generating up to 20 vote requests per category.
+export const voteIpLimiter = makeLimiter(200, "1 h");
+export const voteBurstLimiter = makeLimiter(25, "1 m");
 
 // A blunt per-IP ceiling across ALL API routes — the cheap first line against
 // someone simply hammering the site during voting hours. Deliberately high

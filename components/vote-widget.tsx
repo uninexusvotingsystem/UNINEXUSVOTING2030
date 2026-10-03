@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Script from "next/script";
 import { CheckCircle2, Loader2, AlertCircle, Smartphone, ShieldCheck } from "lucide-react";
 
@@ -13,7 +13,7 @@ type Nominee = {
   vote_count?: number;
   media?: { id: string; media_url: string; media_type: "image" | "video" }[];
 };
-const VOTE_LIMIT = 8;
+const VOTE_LIMIT = 20;
 type Step = "choose" | "phone" | "code" | "limit";
 
 // Vote counts render ONLY when resultsPublished is true — this comes
@@ -36,12 +36,18 @@ export function VoteWidget({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Votes already cast by this phone in this category, and whether a verified
-  // phone+code pair is currently held so a 2nd-8th vote can skip straight
+  // phone+code pair is currently held so a 2nd-20th vote can skip straight
   // past the phone/OTP steps instead of asking the voter to re-verify (and
   // without sending another SMS) for every single vote.
   const [votesUsed, setVotesUsed] = useState(0);
   const [verified, setVerified] = useState(false);
   const [lastVotedName, setLastVotedName] = useState<string | null>(null);
+  // Seconds remaining before "Resend code" can be tapped again — a short
+  // client-side cooldown so an impatient voter can't spam the button; the
+  // real protection against abuse is still the server-side rate limiter
+  // (3 OTP requests per phone per 15 min), this is just a friendlier UX
+  // nudge on top of it.
+  const [resendCooldown, setResendCooldown] = useState(0);
 
   function choose(n: Nominee) {
     setSelected(n);
@@ -56,7 +62,14 @@ export function VoteWidget({
     }
   }
 
-  async function sendCode(e: React.FormEvent) {
+  // Ticks the resend cooldown down to zero once a resend has been triggered.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
+
+  async function sendCode(e: React.FormEvent, resend = false) {
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -75,16 +88,25 @@ export function VoteWidget({
       const res = await fetch("/api/vote/otp-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, phone, turnstileToken }),
+        body: JSON.stringify({ categoryId, phone, turnstileToken, forceResend: resend }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Couldn't send a code.");
       setStep("code");
+      if (resend) {
+        setCode("");
+        setResendCooldown(30);
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function resendCode() {
+    if (resendCooldown > 0 || loading) return;
+    await sendCode({ preventDefault: () => {} } as React.FormEvent, true);
   }
 
   async function castVote(nominee: Nominee) {
@@ -206,9 +228,19 @@ export function VoteWidget({
             <button type="submit" disabled={loading || code.length !== 6} className="btn-gold w-full !py-3.5 disabled:opacity-60">
               {loading ? <Loader2 className="size-4 animate-spin" /> : "Confirm my vote"}
             </button>
-            <button type="button" onClick={() => setStep("phone")} className="text-xs text-ink/45 hover:text-gold-deep w-full text-center">
-              Wrong number? Go back
-            </button>
+            <div className="flex items-center justify-between">
+              <button type="button" onClick={() => setStep("phone")} className="text-xs text-ink/45 hover:text-gold-deep text-center">
+                Wrong number? Go back
+              </button>
+              <button
+                type="button"
+                onClick={resendCode}
+                disabled={resendCooldown > 0 || loading}
+                className="text-xs font-semibold text-gold-deep hover:text-gold disabled:text-ink/30 disabled:cursor-not-allowed text-center"
+              >
+                {resendCooldown > 0 ? `Resend code (${resendCooldown}s)` : "Didn't get it? Resend code"}
+              </button>
+            </div>
           </form>
         )}
       </div>
@@ -270,19 +302,53 @@ function NomineeCard({
   return (
     <div className="card-elegant p-6">
       {cover && (
-        // A plain `aspect-square` class on the <img> itself depends on the
-        // browser applying `aspect-ratio` correctly before the image's own
-        // natural size is known — inconsistent in practice (a tall portrait
-        // photo or a logo can briefly, or sometimes permanently, render at
-        // its native size instead of being cropped to a square, which is
-        // exactly the "some photos look huge" issue this replaces). An
-        // explicit relative/absolute wrapper forces the crop unconditionally,
-        // regardless of the uploaded photo's original orientation.
-        <div className="relative w-full aspect-square rounded-lg mb-4 overflow-hidden bg-black/5">
+        // Sizing is forced with INLINE styles here, not Tailwind classes
+        // (aspect-square, object-cover, etc.) — a Tailwind utility only ends
+        // up in the final CSS if it's detected at build time, and can also
+        // be served from a stale cached stylesheet after a deploy. An inline
+        // style attribute is written directly into the HTML on every render,
+        // so there's no class-generation or caching step that can drop it.
+        // This is the belt-and-braces version after the class-based fix
+        // still weren't rendering correctly for some nominees in production.
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            aspectRatio: "1 / 1",
+            overflow: "hidden",
+            borderRadius: "0.5rem",
+            marginBottom: "1rem",
+            backgroundColor: "rgba(0,0,0,0.05)",
+          }}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={cover.media_url} alt={nominee.name} className="absolute inset-0 w-full h-full object-cover" />
+          <img
+            src={cover.media_url}
+            alt={nominee.name}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
           {resultsPublished && rank === 1 && (
-            <span className="absolute top-2 left-2 bg-gold text-ink text-[11px] font-semibold px-2 py-1 rounded-full shadow">
+            <span
+              style={{
+                position: "absolute",
+                top: "0.5rem",
+                left: "0.5rem",
+                background: "#C9A227",
+                color: "#0A0A0B",
+                fontSize: "11px",
+                fontWeight: 600,
+                padding: "0.25rem 0.5rem",
+                borderRadius: "9999px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+              }}
+            >
               #1
             </span>
           )}
@@ -305,14 +371,33 @@ function NomineeCard({
       </div>
 
       {media.length > 0 && (
-        <div className="grid grid-cols-3 gap-1.5 mb-4">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.375rem", marginBottom: "1rem" }}>
           {media.slice(0, 6).map((m) => (
-            <div key={m.id} className="rounded-md overflow-hidden aspect-square bg-black/5">
+            <div
+              key={m.id}
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: "1 / 1",
+                overflow: "hidden",
+                borderRadius: "0.375rem",
+                backgroundColor: "rgba(0,0,0,0.05)",
+              }}
+            >
               {m.media_type === "video" ? (
-                <video src={m.media_url} className="w-full h-full object-cover" muted playsInline />
+                <video
+                  src={m.media_url}
+                  muted
+                  playsInline
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={m.media_url} alt="" className="w-full h-full object-cover" />
+                <img
+                  src={m.media_url}
+                  alt=""
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                />
               )}
             </div>
           ))}

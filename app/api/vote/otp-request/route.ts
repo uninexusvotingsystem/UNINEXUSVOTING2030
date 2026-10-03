@@ -15,6 +15,12 @@ const schema = z.object({
   categoryId: z.string().uuid(),
   phone: z.string().min(9),
   turnstileToken: z.string().optional(),
+  // True when the voter explicitly tapped "Resend code" because the first
+  // SMS never arrived — forces a brand-new code instead of silently reusing
+  // a still-valid pending one. Rate limited exactly the same as any other
+  // request to this route (otpRequestPhoneLimiter: 3 per 15 min), so this
+  // can't be used to spam SMS any more than a normal request could.
+  forceResend: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -31,7 +37,7 @@ export async function POST(request: Request) {
   if (globalBlocked) return globalBlocked;
 
   try {
-    const { categoryId, phone: rawPhone, turnstileToken } = schema.parse(await request.json());
+    const { categoryId, phone: rawPhone, turnstileToken, forceResend } = schema.parse(await request.json());
 
     // CAPTCHA before anything that costs money. Every OTP request sends a real
     // SMS you pay for, so this endpoint is the one most worth protecting from
@@ -60,13 +66,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Voting isn't open for this category." }, { status: 400 });
     }
 
-    // Up to 8 votes per phone per category are allowed (across any nominee,
+    // Up to 20 votes per phone per category are allowed (across any nominee,
     // in any distribution) — the real, unbypassable enforcement of this is a
     // database trigger on the votes table, not this check. This is just the
-    // early, cheap rejection so someone who's already used all 8 doesn't get
+    // early, cheap rejection so someone who's already used all 20 doesn't get
     // sent another SMS (which costs real money) only to be blocked at the
     // final vote-cast step anyway.
-    const VOTE_LIMIT = 8;
+    const VOTE_LIMIT = 20;
     const { count: votesSoFar } = await supabase
       .from("votes")
       .select("id", { count: "exact", head: true })
@@ -81,23 +87,35 @@ export async function POST(request: Request) {
     }
 
     // If a still-valid, not-yet-expired code already exists for this phone +
-    // category (e.g. a voter requesting their 2nd-8th vote within the same
+    // category (e.g. a voter requesting their 2nd-20th vote within the same
     // 5-minute window, or a page refresh after already receiving a code),
-    // reuse it instead of sending another SMS. Saves real SMS cost and is
-    // safe: the code is still checked for expiry at vote-cast time regardless.
-    const { data: existingOtp } = await supabase
-      .from("otp_codes")
-      .select("id")
-      .eq("category_id", categoryId)
-      .eq("phone_hash", phoneHash)
-      .eq("consumed", false)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // reuse it instead of sending another SMS — UNLESS forceResend is set,
+    // meaning the voter explicitly said the first message never arrived. In
+    // that case the stale code is marked consumed so it's no longer valid,
+    // avoiding two simultaneously-"correct" codes for the same phone+
+    // category, and a fresh one is generated and sent instead.
+    if (!forceResend) {
+      const { data: existingOtp } = await supabase
+        .from("otp_codes")
+        .select("id")
+        .eq("category_id", categoryId)
+        .eq("phone_hash", phoneHash)
+        .eq("consumed", false)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    if (existingOtp) {
-      return NextResponse.json({ ok: true });
+      if (existingOtp) {
+        return NextResponse.json({ ok: true });
+      }
+    } else {
+      await supabase
+        .from("otp_codes")
+        .update({ consumed: true })
+        .eq("category_id", categoryId)
+        .eq("phone_hash", phoneHash)
+        .eq("consumed", false);
     }
 
     const code = generateOtpCode();

@@ -75,9 +75,9 @@ export async function POST(request: Request) {
 
     // Code is correct — cast the vote. A database trigger on the votes table
     // (not this application check) is the real, unbypassable guard against
-    // exceeding the 8-vote cap, race-proof under concurrent requests via an
+    // exceeding the 20-vote cap, race-proof under concurrent requests via an
     // advisory lock scoped to this exact phone+category pair.
-    const VOTE_LIMIT = 8;
+    const VOTE_LIMIT = 20;
     const { error } = await supabase.from("votes").insert({
       category_id: categoryId,
       nominee_id: nomineeId,
