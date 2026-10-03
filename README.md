@@ -17,7 +17,7 @@ can never affect the main site's members, tickets, or payments.
 3. **Voting phase** — once a category's shortlist is ready, open voting for
    it (Admin → Categories → "Voting: Open"). Share the vote link. Voters
    verify with a phone OTP (via Celcom Africa SMS) before their vote
-   counts — up to 8 votes per phone number, per category (across any
+   counts — up to 20 votes per phone number, per category (across any
    nominee, in any distribution), enforced by a database trigger (not just
    app logic, so it can't be raced or bypassed).
 4. **Results** — toggle "Results: Public" on a category once you want the
@@ -108,12 +108,14 @@ redeploy needed. Seeded with the launch message by migration `0003`.
   step. The OTP one matters most: every code sent costs you real SMS money,
   so without it a script could drain your Celcom Africa balance just by
   requesting codes in a loop. A still-valid, unexpired code is also reused
-  automatically for a voter's 2nd-8th vote in the same category, so a full
-  8-vote session only ever costs one SMS.
+  automatically for a voter's 2nd-20th vote in the same category, so a full
+  20-vote session only ever costs one SMS (unless the voter explicitly taps
+  "Resend code" because the first message never arrived).
 - Layered rate limiting, all per-IP: a global ceiling across every API route
-  (120/min), a burst limit on voting and OTP requests (10/min — raised from
-  5/min so a real voter casting all 8 of their own votes quickly isn't
-  throttled), and slower sustained limits on top (80 votes/hr, 3 OTPs per
+  (120/min), a burst limit on voting and OTP requests (25/min — raised in
+  steps as the vote cap grew, so a real voter casting all 20 of their own
+  votes quickly isn't throttled), and slower sustained limits on top (200
+  votes/hr, 3 OTPs per
   phone per 15 min). The
   burst limits are what actually catch scripted mass-voting, while the
   sustained limits stay generous enough for a whole campus sharing one IP.

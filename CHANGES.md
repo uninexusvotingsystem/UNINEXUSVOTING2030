@@ -71,6 +71,31 @@ nominee and vote data was not touched by any of this.
   the CSP `img-src`/`media-src` (required for item 1 above; nominee photos
   silently fail to render without both of these).
 
+## 5. Vote cap raised 8 → 20, plus a genuine resend option
+- `supabase/migrations/0006_vote_cap_twenty.sql` — same trigger mechanism as
+  0005, only the limit constant changed. Tested directly the same way: 20
+  sequential inserts succeeded, a 21st was rejected, before being saved here.
+- `lib/rate-limit.ts` — vote burst limit raised 10→25/min, hourly vote IP
+  limit raised 80→200/hr, scaled for the higher cap so a real voter using
+  all 20 votes quickly isn't throttled by limits sized for 8.
+- `app/api/vote/otp-request/route.ts` — now accepts a `forceResend` flag.
+  Normal requests still silently reuse a still-valid pending code (no SMS
+  cost); an explicit resend invalidates the old code and sends a genuinely
+  new one, closing the "first SMS never arrived" gap flagged last round.
+- `components/vote-widget.tsx` — a "Didn't get it? Resend code" link on the
+  code-entry screen, with a 30-second client-side cooldown to prevent
+  impatient re-tapping (the real abuse protection is still the existing
+  server-side rate limiter: 3 OTP requests per phone per 15 minutes, which
+  this does not bypass).
+
+**On raising the cap specifically — does it affect performance?** No. The
+enforcement mechanism (one count query + an advisory lock per vote insert)
+costs exactly the same regardless of whether the limit is 8 or 20 — it's
+not a loop or a scan, just a single indexed count. The only real difference
+is more total rows written to `votes` as people actually use more of their
+allowance, which is normal, expected load that Postgres handles easily at
+this scale.
+
 ## Known tradeoffs, worth knowing about
 - If a voter's very first OTP SMS genuinely never arrives (network issue on
   Celcom's end, etc.), the current backend logic reuses the still-valid
