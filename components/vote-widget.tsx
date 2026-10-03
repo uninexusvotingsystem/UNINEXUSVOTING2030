@@ -300,7 +300,13 @@ function NomineeCard({
   const cover = media.find((m) => m.media_type === "image");
 
   return (
-    <div className="card-elegant p-6">
+    // minWidth: 0 overrides the grid item's default min-width:auto — without
+    // it, a long "about" description can force this card (and everything
+    // inside it, including the photo) wider than its grid column, which is
+    // very likely the real cause of cards appearing cut off at the screen
+    // edge rather than properly contained like Onsarigo Joshua's. This is a
+    // well-documented CSS Grid behavior, not specific to this photo issue.
+    <div className="card-elegant p-6" style={{ minWidth: 0 }}>
       {cover && (
         // Sizing is forced with INLINE styles, not Tailwind classes — a
         // class only ends up in the final CSS if detected at build time and
@@ -367,7 +373,12 @@ function NomineeCard({
       </div>
 
       <div className="mb-3">
-        <p className={expanded ? "text-sm text-ink/60" : "text-sm text-ink/60 truncate"}>{nominee.about}</p>
+        <p
+          className={expanded ? "text-sm text-ink/60" : "text-sm text-ink/60 truncate"}
+          style={{ overflowWrap: "break-word", wordBreak: "break-word" }}
+        >
+          {nominee.about}
+        </p>
         <button onClick={() => setExpanded((v) => !v)} className="text-xs font-semibold text-gold-deep mt-0.5">
           {expanded ? "Show less" : "Read more"}
         </button>
