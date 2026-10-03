@@ -302,19 +302,22 @@ function NomineeCard({
   return (
     <div className="card-elegant p-6">
       {cover && (
-        // Sizing is forced with INLINE styles here, not Tailwind classes
-        // (aspect-square, object-cover, etc.) — a Tailwind utility only ends
-        // up in the final CSS if it's detected at build time, and can also
-        // be served from a stale cached stylesheet after a deploy. An inline
-        // style attribute is written directly into the HTML on every render,
-        // so there's no class-generation or caching step that can drop it.
-        // This is the belt-and-braces version after the class-based fix
-        // still weren't rendering correctly for some nominees in production.
+        // Sizing is forced with INLINE styles, not Tailwind classes — a
+        // class only ends up in the final CSS if detected at build time and
+        // can be served from a stale cached stylesheet. A FIXED PIXEL HEIGHT
+        // is used here instead of the CSS `aspect-ratio` property: evidence
+        // pointed to some voters opening this link inside an app's built-in
+        // browser (Facebook/TikTok's in-app viewer — no address bar visible
+        // in their screenshot), which can run an older WebView engine with
+        // incomplete support for aspect-ratio even though real Chrome has
+        // supported it since 2021. A fixed pixel height has no such
+        // dependency — it's the most basic, universally supported sizing
+        // CSS there is, nothing left for an older engine to fail on.
         <div
           style={{
             position: "relative",
             width: "100%",
-            aspectRatio: "1 / 1",
+            height: "300px",
             overflow: "hidden",
             borderRadius: "0.5rem",
             marginBottom: "1rem",
@@ -378,7 +381,7 @@ function NomineeCard({
               style={{
                 position: "relative",
                 width: "100%",
-                aspectRatio: "1 / 1",
+                height: "110px",
                 overflow: "hidden",
                 borderRadius: "0.375rem",
                 backgroundColor: "rgba(0,0,0,0.05)",
