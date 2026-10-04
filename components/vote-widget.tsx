@@ -340,6 +340,12 @@ function NomineeCard({
               width: "100%",
               height: "100%",
               objectFit: "cover",
+              // Biased toward the top rather than dead-center: a center crop
+              // on a tall portrait photo cuts equally off the top and
+              // bottom, which is exactly what was cutting faces off (most
+              // portrait/headshot photos have the face in the upper half,
+              // not the vertical middle).
+              objectPosition: "center top",
               display: "block",
             }}
           />
@@ -403,14 +409,14 @@ function NomineeCard({
                   src={m.media_url}
                   muted
                   playsInline
-                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }}
                 />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={m.media_url}
                   alt=""
-                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top" }}
                 />
               )}
             </div>
