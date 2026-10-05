@@ -96,6 +96,47 @@ is more total rows written to `votes` as people actually use more of their
 allowance, which is normal, expected load that Postgres handles easily at
 this scale.
 
+## 6. Fixed vote_count drift (phantom votes) + live admin tally + QR codes
+- **Root cause found and fixed:** `sync_nominee_vote_count` only ever
+  handled `INSERT`, never `DELETE` — so any removed vote row (including
+  the vote-cap testing done while building item 5) left `vote_count`
+  permanently inflated. One nominee showed 33 stored vs 0 real votes before
+  this was caught. `supabase/migrations/0007_fix_vote_count_sync.sql` fixes
+  the trigger to handle both directions and does a one-time recompute of
+  every nominee's count from the real `votes` table. Verified after: zero
+  nominees with mismatched counts, totals match exactly.
+- **On vote integrity:** every row in `votes` counts as exactly one vote
+  toward `vote_count`, including repeat votes from the same phone within
+  their 20-per-category allowance — that's correct and intentional, not a
+  bug to "fix." The thing that actually prevents manipulation is the
+  database-enforced cap (item 5) and OTP verification, not deduplication by
+  phone number.
+- `app/admin/results/page.tsx` — new admin-only live tally page, polling
+  every 10s. Shows real vote counts per nominee per category regardless of
+  whether "Results: Public" is toggled on for voters — that toggle only
+  ever controlled the public vote page, this is separate and always visible
+  to the admin. Added to admin nav in `app/admin/layout.tsx`.
+- `app/admin/categories/page.tsx` — QR codes added: one per category (for
+  that category's vote link) and one site-wide (the general nominate+vote
+  link), both shown as scannable images, long-press/right-click to save for
+  printing. Uses a free external QR image service (no new npm dependency),
+  which required adding its domain to the CSP in `next.config.mjs` — same
+  requirement as the R2 domain earlier, or the images silently fail to load.
+
+## 7. Admin can replace a nominee's photo
+- `app/admin/api/nominees/replace-photo/route.ts` — new route, deliberately
+  placed under `/admin/api/...` (not `/api/admin/...`) so it's covered by
+  middleware.ts's existing `/admin` auth guard automatically. The admin
+  check is also repeated inside the route itself as defense in depth —
+  an action this sensitive shouldn't depend solely on something outside
+  the handler to stay safe. Uploads through the same R2 path as public
+  nominations (same validation: images only, 8MB max), and cleans up the
+  old R2 file after a successful replace so storage doesn't accumulate
+  orphaned photos.
+- `app/admin/nominees/page.tsx` — hover over any nominee's existing photo
+  thumbnail and click to pick a replacement file; uploads in place with a
+  small spinner on just that thumbnail, no full-page reload needed.
+
 ## Known tradeoffs, worth knowing about
 - If a voter's very first OTP SMS genuinely never arrives (network issue on
   Celcom's end, etc.), the current backend logic reuses the still-valid

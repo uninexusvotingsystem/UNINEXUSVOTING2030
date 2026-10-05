@@ -26,7 +26,7 @@ const nextConfig = {
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
-              "img-src 'self' data: blob: https://*.supabase.co https://*.r2.dev",
+              "img-src 'self' data: blob: https://*.supabase.co https://*.r2.dev https://api.qrserver.com",
               "media-src 'self' https://*.supabase.co https://*.r2.dev",
               "connect-src 'self' https://*.supabase.co",
               "frame-src 'self' https://www.google.com",
