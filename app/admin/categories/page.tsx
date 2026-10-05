@@ -2,14 +2,26 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Plus, Link2, Trash2, Globe } from "lucide-react";
+import { Loader2, Plus, Link2, Trash2, Globe, QrCode } from "lucide-react";
 
 const EMPTY = { name: "", slug: "", description: "" };
+
+// A free, no-API-key QR generation service, loaded as a plain image — no new
+// npm dependency needed, which matters given how this project gets deployed
+// (file uploads through GitHub's web UI, not a local build). Requires
+// api.qrserver.com to be allowed in next.config.mjs's CSP img-src, or the
+// image silently fails to load — same class of issue as the R2 domain
+// earlier, so it's already been added there.
+function qrCodeUrl(targetUrl: string, size = 320) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(targetUrl)}`;
+}
 
 export default function AdminCategoriesPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [form, setForm] = useState<any>(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [qrOpenFor, setQrOpenFor] = useState<string | null>(null);
+  const [siteQrOpen, setSiteQrOpen] = useState(false);
 
   async function load() {
     const supabase = createClient();
@@ -70,9 +82,29 @@ export default function AdminCategoriesPage() {
     <div className="p-8 sm:p-10 max-w-4xl">
       <h1 className="heading-display text-3xl mb-1">Categories</h1>
       <p className="text-sm text-ink/50 mb-4">Create categories, manage open/closed state, and share links.</p>
-      <button onClick={copyGeneralLink} className="mb-8 text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1.5">
-        <Globe className="size-3.5" /> Copy general link (every category — nominate &amp; vote)
-      </button>
+      <div className="flex flex-wrap gap-2 mb-8">
+        <button onClick={copyGeneralLink} className="text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1.5">
+          <Globe className="size-3.5" /> Copy general link (every category — nominate &amp; vote)
+        </button>
+        <button onClick={() => setSiteQrOpen((v) => !v)} className="text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1.5">
+          <QrCode className="size-3.5" /> {siteQrOpen ? "Hide" : "Show"} whole-site QR code
+        </button>
+      </div>
+
+      {siteQrOpen && (
+        <div className="card-elegant p-6 mb-8 text-center">
+          <p className="text-sm text-ink/60 mb-3">Scan to open the general link — every category, nominate &amp; vote.</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={qrCodeUrl(typeof window !== "undefined" ? `${location.origin}/` : "", 320)}
+            alt="QR code for the whole site"
+            className="mx-auto rounded-lg border border-black/10"
+            width={320}
+            height={320}
+          />
+          <p className="text-[11px] text-ink/40 mt-2">Long-press or right-click the image to save it for printing.</p>
+        </div>
+      )}
 
       <form onSubmit={addCategory} className="card-elegant p-6 space-y-3 mb-8">
         <h2 className="font-display text-lg mb-1">New category</h2>
@@ -132,7 +164,25 @@ export default function AdminCategoriesPage() {
               <button onClick={() => copyVoteLink(c.slug)} className="text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1">
                 <Link2 className="size-3" /> Copy vote link
               </button>
+              <button onClick={() => setQrOpenFor(qrOpenFor === c.id ? null : c.id)} className="text-xs px-3 py-1.5 rounded-full border border-gold/30 text-gold-deep hover:bg-gold/10 flex items-center gap-1">
+                <QrCode className="size-3" /> {qrOpenFor === c.id ? "Hide" : "Show"} QR code
+              </button>
             </div>
+
+            {qrOpenFor === c.id && (
+              <div className="mt-3 text-center">
+                <p className="text-xs text-ink/50 mb-2">Scan to vote directly in "{c.name}"</p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qrCodeUrl(typeof window !== "undefined" ? `${location.origin}/vote/${c.slug}` : "", 280)}
+                  alt={`QR code for voting in ${c.name}`}
+                  className="mx-auto rounded-lg border border-black/10"
+                  width={280}
+                  height={280}
+                />
+                <p className="text-[11px] text-ink/40 mt-2">Long-press or right-click the image to save it for printing.</p>
+              </div>
+            )}
           </div>
         ))}
         {categories.length === 0 && <p className="text-sm text-ink/40 text-center py-4">No categories yet — add one above.</p>}

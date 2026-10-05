@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Loader2, Check, X, Trash2, Search, Film } from "lucide-react";
+import { Loader2, Check, X, Trash2, Search, Film, RefreshCw } from "lucide-react";
 
 const PAGE_SIZE = 25;
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 export default function AdminNomineesPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -17,6 +18,40 @@ export default function AdminNomineesPage() {
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  // Which specific media item is mid-upload, so only that one thumbnail
+  // shows a spinner rather than blocking the whole page during a replace.
+  const [replacingMediaId, setReplacingMediaId] = useState<string | null>(null);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+
+  async function replacePhoto(nomineeId: string, mediaId: string, file: File) {
+    setReplaceError(null);
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      setReplaceError("Only JPEG, PNG, or WEBP images are allowed.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setReplaceError("Photo must be under 8MB.");
+      return;
+    }
+    setReplacingMediaId(mediaId);
+    try {
+      const body = new FormData();
+      body.set("nomineeId", nomineeId);
+      body.set("mediaId", mediaId);
+      body.set("file", file);
+      const res = await fetch("/admin/api/nominees/replace-photo", { method: "POST", body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't replace the photo.");
+      setMediaByNominee((prev) => ({
+        ...prev,
+        [nomineeId]: (prev[nomineeId] || []).map((m) => (m.id === mediaId ? { ...m, media_url: data.mediaUrl, media_type: "image" } : m)),
+      }));
+    } catch (err: any) {
+      setReplaceError(err.message);
+    } finally {
+      setReplacingMediaId(null);
+    }
+  }
 
   useEffect(() => {
     const supabase = createClient();
@@ -143,17 +178,42 @@ export default function AdminNomineesPage() {
                   {media.length > 0 && (
                     <div className="flex gap-1.5">
                       {media.map((m) => (
-                        <div key={m.id} className="size-12 rounded-md overflow-hidden bg-black/5 shrink-0">
+                        <label
+                          key={m.id}
+                          title="Click to replace this photo"
+                          className="relative size-12 rounded-md overflow-hidden bg-black/5 shrink-0 cursor-pointer group"
+                        >
                           {m.media_type === "video" ? (
                             <div className="w-full h-full flex items-center justify-center bg-black/80"><Film className="size-4 text-cream/70" /></div>
                           ) : (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={m.media_url} alt="" className="w-full h-full object-cover" />
                           )}
-                        </div>
+                          {/* Hover overlay signals this thumbnail is clickable; the actual
+                              file input is visually hidden but covers the whole thumbnail. */}
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center">
+                            {replacingMediaId === m.id ? (
+                              <Loader2 className="size-4 text-white animate-spin" />
+                            ) : (
+                              <RefreshCw className="size-3.5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                            )}
+                          </div>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            disabled={replacingMediaId !== null}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = "";
+                              if (file) replacePhoto(n.id, m.id, file);
+                            }}
+                          />
+                        </label>
                       ))}
                     </div>
                   )}
+                  {replaceError && <p className="text-[11px] text-red-600 mt-1">{replaceError}</p>}
                 </div>
                 <div className="flex flex-col gap-1.5 shrink-0">
                   {n.status !== "approved" && (
