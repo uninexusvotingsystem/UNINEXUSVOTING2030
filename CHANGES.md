@@ -137,6 +137,32 @@ this scale.
   thumbnail and click to pick a replacement file; uploads in place with a
   small spinner on just that thumbnail, no full-page reload needed.
 
+## 8. Quantity voting (fixes repeated-clicking) + pre-launch performance pass
+- `app/api/vote/cast/route.ts` now accepts a `quantity` field — a voter can
+  type "15" once instead of tapping Vote fifteen times. Implemented as ONE
+  bulk insert of `quantity` rows per request, not quantity-many separate
+  requests. **Tested directly against the live database before trusting
+  it**: a 15-row bulk insert succeeded; a follow-up 10-row insert that would
+  have exceeded the 20 cap was rejected and rolled back *atomically* (count
+  stayed at exactly 15, nothing partial landed); a final exact 5-row insert
+  reached exactly 20; a 21st was rejected. Test data cleaned up after.
+- `components/vote-widget.tsx` — each nominee card now has a quantity
+  stepper (+/−, typable, auto-clamped to however many votes remain) instead
+  of a bare "Vote" button. Defaults to 1, so a single tap still works
+  exactly like before for anyone who just wants one vote.
+- The "all votes used" screen now invites the voter to the Gala Dinner
+  (Friday, 6th November 2026, SportView) with a real "Get your tickets"
+  link, using the same `GALA_TICKETS_URL` constant already used elsewhere
+  on the site — not a new/separate link.
+- **Performance, found while reviewing for go-live:** the cast route was
+  running two separate COUNT queries per request (one before inserting, one
+  after) — the second was mathematically redundant, since the insert is
+  atomic and quantity is known. Removed, cutting one full DB round trip per
+  vote. `lib/category-cache.ts` — a new shared 20-second cache for a
+  category's `voting_open` status, now used by both the OTP-request and
+  cast routes instead of querying fresh on every single request; same
+  pattern already proven on the nomination route.
+
 ## Known tradeoffs, worth knowing about
 - If a voter's very first OTP SMS genuinely never arrives (network issue on
   Celcom's end, etc.), the current backend logic reuses the still-valid
