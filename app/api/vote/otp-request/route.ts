@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { getCategoryVotingStatus } from "@/lib/category-cache";
 import { generateOtpCode, hashValue, normalizePhone } from "@/lib/otp";
 import { sendOtpSms } from "@/lib/sms";
 import {
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
 
     const supabase = createServiceRoleClient();
 
-    const { data: category } = await supabase.from("categories").select("id, voting_open").eq("id", categoryId).maybeSingle();
+    const category = await getCategoryVotingStatus(supabase, categoryId);
     if (!category || !category.voting_open) {
       return NextResponse.json({ error: "Voting isn't open for this category." }, { status: 400 });
     }

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Script from "next/script";
-import { CheckCircle2, Loader2, AlertCircle, Smartphone, ShieldCheck } from "lucide-react";
+import { CheckCircle2, Loader2, AlertCircle, Smartphone, ShieldCheck, CalendarHeart } from "lucide-react";
+import { GALA_TICKETS_URL } from "@/lib/constants";
 
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -31,6 +32,10 @@ export function VoteWidget({
 }) {
   const [step, setStep] = useState<Step>("choose");
   const [selected, setSelected] = useState<Nominee | null>(null);
+  // How many votes this request is for — chosen by the voter on the card
+  // itself (a number input) rather than needing them to tap "Vote" that
+  // many separate times.
+  const [pendingQuantity, setPendingQuantity] = useState(1);
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,6 +47,7 @@ export function VoteWidget({
   const [votesUsed, setVotesUsed] = useState(0);
   const [verified, setVerified] = useState(false);
   const [lastVotedName, setLastVotedName] = useState<string | null>(null);
+  const [lastVotedQuantity, setLastVotedQuantity] = useState(1);
   // Seconds remaining before "Resend code" can be tapped again — a short
   // client-side cooldown so an impatient voter can't spam the button; the
   // real protection against abuse is still the server-side rate limiter
@@ -49,14 +55,15 @@ export function VoteWidget({
   // nudge on top of it.
   const [resendCooldown, setResendCooldown] = useState(0);
 
-  function choose(n: Nominee) {
+  function choose(n: Nominee, quantity: number) {
     setSelected(n);
+    setPendingQuantity(quantity);
     setError(null);
     setLastVotedName(null);
     // Already verified from an earlier vote this session — skip straight to
     // casting instead of re-asking for phone + OTP.
     if (verified && phone && code) {
-      void castVote(n);
+      void castVote(n, quantity);
     } else {
       setStep("phone");
     }
@@ -109,14 +116,14 @@ export function VoteWidget({
     await sendCode({ preventDefault: () => {} } as React.FormEvent, true);
   }
 
-  async function castVote(nominee: Nominee) {
+  async function castVote(nominee: Nominee, quantity: number) {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/vote/cast", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ categoryId, nomineeId: nominee.id, phone, code }),
+        body: JSON.stringify({ categoryId, nomineeId: nominee.id, phone, code, quantity }),
       });
       const data = await res.json();
 
@@ -136,8 +143,9 @@ export function VoteWidget({
       }
 
       setVerified(true);
-      setVotesUsed(data.votesUsed ?? votesUsed + 1);
+      setVotesUsed(data.votesUsed ?? votesUsed + quantity);
       setLastVotedName(nominee.name);
+      setLastVotedQuantity(quantity);
 
       if ((data.votesRemaining ?? 0) <= 0) {
         setStep("limit");
@@ -154,7 +162,7 @@ export function VoteWidget({
   async function confirmVote(e: React.FormEvent) {
     e.preventDefault();
     if (!selected) return;
-    await castVote(selected);
+    await castVote(selected, pendingQuantity);
   }
 
   if (step === "limit") {
@@ -162,11 +170,28 @@ export function VoteWidget({
       <div className="card-elegant p-8 text-center max-w-md mx-auto">
         <CheckCircle2 className="size-12 text-gold mx-auto mb-4" />
         <h3 className="heading-display text-2xl mb-2">All votes used</h3>
-        <p className="text-ink/65 text-sm">
-          {lastVotedName && <>Thank you for your vote for <strong>{lastVotedName}</strong>. </>}
+        <p className="text-ink/65 text-sm mb-6">
+          {lastVotedName && (
+            <>
+              Thank you for your {lastVotedQuantity} vote{lastVotedQuantity === 1 ? "" : "s"} for <strong>{lastVotedName}</strong>.{" "}
+            </>
+          )}
           This phone number has now used all {VOTE_LIMIT} votes allowed in this category — your votes are locked in.
           You're welcome to vote in a different category.
         </p>
+        <div className="rounded-xl border border-gold/30 bg-gold/5 p-5 text-left">
+          <div className="flex items-center gap-2 mb-2">
+            <CalendarHeart className="size-5 text-gold-deep shrink-0" />
+            <p className="font-display text-base">You're invited to the Gala!</p>
+          </div>
+          <p className="text-sm text-ink/60 mb-4">
+            Join us at the UniNexus Connect Gala Dinner Awarding Ceremony — <strong>Friday, 6th November 2026</strong>, at{" "}
+            <strong>SportView</strong> — where this year's winners are announced live.
+          </p>
+          <a href={GALA_TICKETS_URL} target="_blank" rel="noreferrer" className="btn-gold inline-flex !py-2.5 !px-5 text-sm">
+            Get your tickets
+          </a>
+        </div>
       </div>
     );
   }
@@ -175,7 +200,10 @@ export function VoteWidget({
     return (
       <div className="card-elegant p-6 sm:p-8 max-w-md mx-auto">
         <p className="text-xs uppercase tracking-wider text-gold-deep mb-1">Voting for</p>
-        <h3 className="font-display text-2xl mb-6">{selected?.name}</h3>
+        <h3 className="font-display text-2xl mb-1">{selected?.name}</h3>
+        <p className="text-sm text-ink/50 mb-6">
+          {pendingQuantity} vote{pendingQuantity === 1 ? "" : "s"}
+        </p>
 
         {error && (
           <div className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
@@ -226,7 +254,7 @@ export function VoteWidget({
               />
             </div>
             <button type="submit" disabled={loading || code.length !== 6} className="btn-gold w-full !py-3.5 disabled:opacity-60">
-              {loading ? <Loader2 className="size-4 animate-spin" /> : "Confirm my vote"}
+              {loading ? <Loader2 className="size-4 animate-spin" /> : `Confirm ${pendingQuantity} vote${pendingQuantity === 1 ? "" : "s"}`}
             </button>
             <div className="flex items-center justify-between">
               <button type="button" onClick={() => setStep("phone")} className="text-xs text-ink/45 hover:text-gold-deep text-center">
@@ -253,7 +281,11 @@ export function VoteWidget({
         <div className="mb-5 max-w-md mx-auto flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
           <CheckCircle2 className="size-4 shrink-0" />
           <span>
-            {lastVotedName && <>Vote recorded for <strong>{lastVotedName}</strong>. </>}
+            {lastVotedName && (
+              <>
+                {lastVotedQuantity} vote{lastVotedQuantity === 1 ? "" : "s"} recorded for <strong>{lastVotedName}</strong>.{" "}
+              </>
+            )}
             You have {VOTE_LIMIT - votesUsed} of {VOTE_LIMIT} votes left in this category.
           </span>
         </div>
@@ -271,10 +303,11 @@ export function VoteWidget({
           <NomineeCard
             key={n.id}
             nominee={n}
-            onVote={() => choose(n)}
+            onVote={(quantity) => choose(n, quantity)}
             loading={loading}
             resultsPublished={resultsPublished}
             rank={resultsPublished ? i + 1 : undefined}
+            remaining={VOTE_LIMIT - votesUsed}
           />
         ))}
       </div>
@@ -288,16 +321,42 @@ function NomineeCard({
   loading,
   resultsPublished,
   rank,
+  remaining = VOTE_LIMIT,
 }: {
   nominee: Nominee;
-  onVote: () => void;
+  onVote: (quantity: number) => void;
   loading?: boolean;
   resultsPublished?: boolean;
   rank?: number;
+  remaining?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Defaults to 1 so a single tap still works exactly like before for
+  // anyone who just wants one vote — typing a bigger number is optional,
+  // not required, for the simple case.
+  const [quantity, setQuantity] = useState(1);
   const media = nominee.media || [];
   const cover = media.find((m) => m.media_type === "image");
+
+  // If a vote on THIS or another card just reduced how many votes remain,
+  // make sure this card's chosen quantity can't still be sitting above the
+  // new ceiling (e.g. had "15" selected, cast those, 5 remain — clamp down
+  // to 5 automatically rather than letting a stale "15" linger unusably).
+  useEffect(() => {
+    setQuantity((q) => Math.min(q, Math.max(1, remaining)));
+  }, [remaining]);
+
+  function handleQuantityChange(raw: string) {
+    const n = parseInt(raw, 10);
+    if (Number.isNaN(n)) {
+      setQuantity(1);
+      return;
+    }
+    // Clamped to [1, remaining] as the voter types — they physically can't
+    // submit a number higher than what's left, no need for a separate
+    // validation error after the fact.
+    setQuantity(Math.min(Math.max(1, n), Math.max(1, remaining)));
+  }
 
   return (
     // minWidth: 0 overrides the grid item's default min-width:auto — without
@@ -424,9 +483,46 @@ function NomineeCard({
         </div>
       )}
 
-      <button onClick={onVote} disabled={loading} className="btn-gold w-full !py-2.5 disabled:opacity-60">
-        {loading ? <Loader2 className="size-4 animate-spin mx-auto" /> : "Vote"}
-      </button>
+      {remaining <= 0 ? (
+        <button disabled className="btn-gold w-full !py-2.5 opacity-40 cursor-not-allowed">No votes left</button>
+      ) : (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-lg border border-black/10 overflow-hidden shrink-0">
+            <button
+              type="button"
+              onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+              disabled={loading}
+              className="w-8 h-10 text-ink/50 hover:bg-black/5 disabled:opacity-40"
+              aria-label="Decrease number of votes"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={remaining}
+              value={quantity}
+              onChange={(e) => handleQuantityChange(e.target.value)}
+              disabled={loading}
+              className="w-12 h-10 text-center text-sm border-x border-black/10 outline-none"
+              aria-label="Number of votes"
+            />
+            <button
+              type="button"
+              onClick={() => setQuantity((q) => Math.min(remaining, q + 1))}
+              disabled={loading}
+              className="w-8 h-10 text-ink/50 hover:bg-black/5 disabled:opacity-40"
+              aria-label="Increase number of votes"
+            >
+              +
+            </button>
+          </div>
+          <button onClick={() => onVote(quantity)} disabled={loading} className="btn-gold flex-1 !py-2.5 disabled:opacity-60">
+            {loading ? <Loader2 className="size-4 animate-spin mx-auto" /> : `Vote (${quantity})`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
