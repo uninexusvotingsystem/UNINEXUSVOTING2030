@@ -69,13 +69,13 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (!otp) {
-      return NextResponse.json({ error: "Request a new verification code and try again." }, { status: 400 });
+      return NextResponse.json({ error: "No code found for this number. Tap \"Resend code\" to get your code." }, { status: 400 });
     }
     if (new Date(otp.expires_at).getTime() < Date.now()) {
-      return NextResponse.json({ error: "That code has expired. Request a new one." }, { status: 400 });
+      return NextResponse.json({ error: "This number was already sent a code earlier and it has expired. Only one code is allowed per number, so another can't be sent." }, { status: 400 });
     }
     if (otp.attempts >= 5) {
-      return NextResponse.json({ error: "Too many incorrect attempts. Request a new code." }, { status: 429 });
+      return NextResponse.json({ error: "Too many incorrect attempts. Tap \"Resend code\" to get your code again." }, { status: 429 });
     }
     if (otp.code_hash !== codeHash) {
       await supabase.from("otp_codes").update({ attempts: otp.attempts + 1 }).eq("id", otp.id);

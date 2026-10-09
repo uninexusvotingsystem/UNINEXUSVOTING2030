@@ -54,6 +54,35 @@ export function VoteWidget({
   // (3 OTP requests per phone per 15 min), this is just a friendlier UX
   // nudge on top of it.
   const [resendCooldown, setResendCooldown] = useState(0);
+  // True once a code has been sent to a number in this category. From then on
+  // this browser can never go back to the "send code" step — only enter the
+  // code, or tap "Resend code" to get the SAME code again. Remembered across
+  // page reloads / coming back later. (The real, unbypassable one-code-per-
+  // number rule is enforced on the server in /api/vote/otp-request.)
+  const [codeSent, setCodeSent] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const lockKey = `unx_vote_lock_${categoryId}`;
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(lockKey);
+      if (saved) {
+        setPhone(saved);
+        setCodeSent(true);
+      }
+    } catch {}
+  }, [lockKey]);
+
+  // Warn before leaving mid-way: some votes cast but not all of them.
+  useEffect(() => {
+    if (votesUsed <= 0 || votesUsed >= VOTE_LIMIT) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [votesUsed]);
 
   function choose(n: Nominee, quantity: number) {
     setSelected(n);
@@ -64,6 +93,8 @@ export function VoteWidget({
     // casting instead of re-asking for phone + OTP.
     if (verified && phone && code) {
       void castVote(n, quantity);
+    } else if (codeSent && phone) {
+      setStep("code");
     } else {
       setStep("phone");
     }
@@ -99,12 +130,18 @@ export function VoteWidget({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Couldn't send a code.");
+      setCodeSent(true);
+      try {
+        localStorage.setItem(lockKey, phone);
+      } catch {}
       setStep("code");
       if (resend) {
         setCode("");
         setResendCooldown(30);
       }
     } catch (err: any) {
+      if (/already used all/i.test(err.message || "")) setStep("limit");
+      if (/sent a code earlier/i.test(err.message || "")) setLocked(true);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -133,11 +170,16 @@ export function VoteWidget({
         // showing a dead end. A true "limit reached" response is handled
         // below via res.ok, since the cap can also be hit via the
         // otp-request pre-check before a vote is ever attempted.
-        const expiredOrInvalid = /expired|request a new|incorrect code/i.test(data.error || "");
-        if (expiredOrInvalid) {
+        if (/already used all/i.test(data.error || "")) {
+          setStep("limit");
+        } else if (/sent a code earlier/i.test(data.error || "")) {
+          setLocked(true);
+        } else if (/code|resend/i.test(data.error || "")) {
+          // Never back to the "send code" step — stay on the code step
+          // where the voter can re-enter the code or tap "Resend code".
           setVerified(false);
           setCode("");
-          setStep("phone");
+          setStep("code");
         }
         throw new Error(data.error || "Couldn't submit your vote.");
       }
@@ -163,6 +205,19 @@ export function VoteWidget({
     e.preventDefault();
     if (!selected) return;
     await castVote(selected, pendingQuantity);
+  }
+
+  if (locked) {
+    return (
+      <div className="card-elegant p-8 text-center max-w-md mx-auto">
+        <AlertCircle className="size-12 text-gold mx-auto mb-4" />
+        <h3 className="heading-display text-2xl mb-2">Code already sent</h3>
+        <p className="text-ink/65 text-sm">
+          This number was already sent a code earlier for this category, and it is no longer valid. Only one code is
+          allowed per number in each category, so a new one can't be sent. You're welcome to vote in a different category.
+        </p>
+      </div>
+    );
   }
 
   if (step === "limit") {
@@ -234,7 +289,7 @@ export function VoteWidget({
               {loading ? <Loader2 className="size-4 animate-spin" /> : "Send verification code"}
             </button>
             <p className="text-[11px] text-ink/40 text-center">
-              One SMS code covers up to {VOTE_LIMIT} votes — this number can cast up to {VOTE_LIMIT} total votes in this category.
+              Only ONE code is sent per number in this category — it is valid for 5 minutes and covers all {VOTE_LIMIT} of your votes. Please vote before it expires.
             </p>
           </form>
         ) : (
@@ -257,9 +312,7 @@ export function VoteWidget({
               {loading ? <Loader2 className="size-4 animate-spin" /> : `Confirm ${pendingQuantity} vote${pendingQuantity === 1 ? "" : "s"}`}
             </button>
             <div className="flex items-center justify-between">
-              <button type="button" onClick={() => setStep("phone")} className="text-xs text-ink/45 hover:text-gold-deep text-center">
-                Wrong number? Go back
-              </button>
+              <span className="text-[11px] text-ink/40">One code per number, valid 5 minutes. Resend if it hasn't arrived.</span>
               <button
                 type="button"
                 onClick={resendCode}

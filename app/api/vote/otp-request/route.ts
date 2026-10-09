@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { getCategoryVotingStatus } from "@/lib/category-cache";
-import { generateOtpCode, hashValue, normalizePhone } from "@/lib/otp";
+import { deriveOtpCode, hashValue, normalizePhone } from "@/lib/otp";
 import { sendOtpSms } from "@/lib/sms";
 import {
   otpRequestPhoneLimiter, otpRequestIpLimiter, voteBurstLimiter, globalApiLimiter,
@@ -40,15 +40,6 @@ export async function POST(request: Request) {
   try {
     const { categoryId, phone: rawPhone, turnstileToken, forceResend } = schema.parse(await request.json());
 
-    // CAPTCHA before anything that costs money. Every OTP request sends a real
-    // SMS you pay for, so this endpoint is the one most worth protecting from
-    // scripted abuse — without it, a bot could drain your Africa's Talking
-    // balance simply by requesting codes in a loop.
-    const turnstileOk = await verifyTurnstileToken(turnstileToken || null, ip);
-    if (!turnstileOk) {
-      return NextResponse.json({ error: "Verification failed — please refresh and try again." }, { status: 400 });
-    }
-
     const phone = normalizePhone(rawPhone);
     if (!/^254(7|1)\d{8}$/.test(phone)) {
       return NextResponse.json({ error: "Enter a valid Kenyan number, e.g. 0712345678." }, { status: 400 });
@@ -67,12 +58,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Voting isn't open for this category." }, { status: 400 });
     }
 
-    // Up to 20 votes per phone per category are allowed (across any nominee,
-    // in any distribution) — the real, unbypassable enforcement of this is a
-    // database trigger on the votes table, not this check. This is just the
-    // early, cheap rejection so someone who's already used all 20 doesn't get
-    // sent another SMS (which costs real money) only to be blocked at the
-    // final vote-cast step anyway.
     const VOTE_LIMIT = 20;
     const { count: votesSoFar } = await supabase
       .from("votes")
@@ -87,51 +72,69 @@ export async function POST(request: Request) {
       );
     }
 
-    // If a still-valid, not-yet-expired code already exists for this phone +
-    // category (e.g. a voter requesting their 2nd-20th vote within the same
-    // 5-minute window, or a page refresh after already receiving a code),
-    // reuse it instead of sending another SMS — UNLESS forceResend is set,
-    // meaning the voter explicitly said the first message never arrived. In
-    // that case the stale code is marked consumed so it's no longer valid,
-    // avoiding two simultaneously-"correct" codes for the same phone+
-    // category, and a fresh one is generated and sent instead.
-    if (!forceResend) {
-      const { data: existingOtp } = await supabase
-        .from("otp_codes")
-        .select("id")
-        .eq("category_id", categoryId)
-        .eq("phone_hash", phoneHash)
-        .eq("consumed", false)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    // STRICT RULE: ONE code per phone number per category, ever. If this phone
+    // has ever been issued a code here (used, unused, expired — any state),
+    // NO new SMS is sent on a normal request; the voter is simply taken to the
+    // "enter your code" step. The only way to get an SMS again is the explicit
+    // "Resend code" button, which re-sends the SAME code (never a new one).
+    const { data: existingOtp } = await supabase
+      .from("otp_codes")
+      .select("id, code_hash, expires_at")
+      .eq("category_id", categoryId)
+      .eq("phone_hash", phoneHash)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      if (existingOtp) {
-        return NextResponse.json({ ok: true });
+    // CAPTCHA before anything that costs money. A resend for a number that
+    // already passed the CAPTCHA once (it has a code on file) skips it — the
+    // widget isn't on screen at the code step — and is still covered by the
+    // per-phone / per-IP / burst limiters above.
+    if (!(forceResend && existingOtp)) {
+      const turnstileOk = await verifyTurnstileToken(turnstileToken || null, ip);
+      if (!turnstileOk) {
+        return NextResponse.json({ error: "Verification failed — please refresh and try again." }, { status: 400 });
       }
-    } else {
-      await supabase
-        .from("otp_codes")
-        .update({ consumed: true })
-        .eq("category_id", categoryId)
-        .eq("phone_hash", phoneHash)
-        .eq("consumed", false);
     }
 
-    const code = generateOtpCode();
-    const codeHash = hashValue(code);
+    // The code is valid for 5 minutes from when it was first sent. If that
+    // window has passed without the voter finishing, they are done for this
+    // category: no new code, no resend, ever. Checked BEFORE anything is sent.
+    if (existingOtp && new Date(existingOtp.expires_at).getTime() < Date.now()) {
+      return NextResponse.json(
+        { error: "This number was already sent a code earlier for this category. Only one code is allowed per number, so another can't be sent." },
+        { status: 403 }
+      );
+    }
 
-    await supabase.from("otp_codes").insert({
-      category_id: categoryId,
-      phone_hash: phoneHash,
-      code_hash: codeHash,
-      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-    });
+    if (existingOtp && !forceResend) {
+      return NextResponse.json({ ok: true, alreadySent: true });
+    }
+
+    const code = deriveOtpCode(phone, categoryId);
+    const codeHash = hashValue(code);
+    const validUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    if (existingOtp) {
+      // Resend (only reachable inside the original 5-minute window): same row,
+      // same code, expiry NOT extended. Older random-code rows move to the
+      // derived code once.
+      await supabase
+        .from("otp_codes")
+        .update({ code_hash: codeHash, attempts: 0 })
+        .eq("id", existingOtp.id);
+    } else {
+      await supabase.from("otp_codes").insert({
+        category_id: categoryId,
+        phone_hash: phoneHash,
+        code_hash: codeHash,
+        expires_at: validUntil,
+      });
+    }
 
     await sendOtpSms(phone, code);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, resent: !!existingOtp });
   } catch (err: any) {
     Sentry.captureException(err);
     console.error("[otp-request] failed:", err?.message || err);
