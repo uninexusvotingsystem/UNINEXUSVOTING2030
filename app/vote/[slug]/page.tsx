@@ -53,7 +53,12 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
 export default async function VoteCategoryPage({ params }: { params: { slug: string } }) {
   const { category, nominees } = await getCategory(params.slug);
-  if (!category || !category.voting_open) notFound();
+  // Only a genuinely bad URL (no category with this slug at all) is a real
+  // 404. A category that EXISTS but has voting_open: false is a completely
+  // different situation — it was showing the same generic "page not found"
+  // either way before this fix, which reads as broken rather than "come
+  // back later."
+  if (!category) notFound();
 
   return (
     <div className="bg-cream min-h-screen">
@@ -68,7 +73,15 @@ export default async function VoteCategoryPage({ params }: { params: { slug: str
       </section>
 
       <section className="container py-14 sm:py-20">
-        {nominees.length === 0 ? (
+        {!category.voting_open ? (
+          <div className="card-elegant p-10 text-center max-w-xl mx-auto">
+            <h2 className="font-display text-2xl mb-2">Voting isn't open yet</h2>
+            <p className="text-sm text-ink/60">
+              Voting for <strong>{category.name}</strong> hasn't opened — check back soon, or follow our socials for the
+              announcement. This page will update automatically the moment voting begins.
+            </p>
+          </div>
+        ) : nominees.length === 0 ? (
           <div className="card-elegant p-10 text-center text-ink/50">Nominees for this category are coming soon.</div>
         ) : (
           <VoteWidget categoryId={category.id} nominees={nominees} resultsPublished={category.results_published} />

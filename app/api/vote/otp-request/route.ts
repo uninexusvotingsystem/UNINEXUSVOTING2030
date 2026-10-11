@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createServiceRoleClient } from "@/lib/supabase/server";
 import { getCategoryVotingStatus } from "@/lib/category-cache";
-import { deriveOtpCode, hashValue, normalizePhone } from "@/lib/otp";
+import { deriveOtpCode, generateOtpCode, hashValue, normalizePhone } from "@/lib/otp";
 import { sendOtpSms } from "@/lib/sms";
 import {
   otpRequestPhoneLimiter, otpRequestIpLimiter, voteBurstLimiter, globalApiLimiter,
@@ -11,6 +11,8 @@ import {
 import { enforceCors } from "@/lib/cors";
 import { verifyTurnstileToken } from "@/lib/turnstile";
 import * as Sentry from "@sentry/nextjs";
+
+const VOTE_LIMIT = 20;
 
 const schema = z.object({
   categoryId: z.string().uuid(),
@@ -58,83 +60,84 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Voting isn't open for this category." }, { status: 400 });
     }
 
-    const VOTE_LIMIT = 20;
-    const { count: votesSoFar } = await supabase
-      .from("votes")
-      .select("id", { count: "exact", head: true })
-      .eq("category_id", categoryId)
-      .eq("phone_hash", phoneHash);
-
-    if ((votesSoFar ?? 0) >= VOTE_LIMIT) {
-      return NextResponse.json(
-        { error: `This phone number has already used all ${VOTE_LIMIT} votes allowed in this category.` },
-        { status: 409 }
-      );
-    }
-
-    // STRICT RULE: ONE code per phone number per category, ever. If this phone
-    // has ever been issued a code here (used, unused, expired — any state),
-    // NO new SMS is sent on a normal request; the voter is simply taken to the
-    // "enter your code" step. The only way to get an SMS again is the explicit
-    // "Resend code" button, which re-sends the SAME code (never a new one).
-    const { data: existingOtp } = await supabase
+    // Lightweight, NON-authoritative peek — used only to decide whether this
+    // request can skip CAPTCHA (a resend from someone who already passed it
+    // once). The real, race-proof decision happens inside request_otp_slot()
+    // below, inside a single locked transaction, so this peek being
+    // slightly stale in a rare race is harmless: worst case is verifying
+    // CAPTCHA when it technically wasn't required, never the reverse.
+    const { data: existingPeek } = await supabase
       .from("otp_codes")
-      .select("id, code_hash, expires_at")
+      .select("id")
       .eq("category_id", categoryId)
       .eq("phone_hash", phoneHash)
-      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    // CAPTCHA before anything that costs money. A resend for a number that
-    // already passed the CAPTCHA once (it has a code on file) skips it — the
-    // widget isn't on screen at the code step — and is still covered by the
-    // per-phone / per-IP / burst limiters above.
-    if (!(forceResend && existingOtp)) {
+    if (!(forceResend && existingPeek)) {
       const turnstileOk = await verifyTurnstileToken(turnstileToken || null, ip);
       if (!turnstileOk) {
         return NextResponse.json({ error: "Verification failed — please refresh and try again." }, { status: 400 });
       }
     }
 
-    // The code is valid for 5 minutes from when it was first sent. If that
-    // window has passed without the voter finishing, they are done for this
-    // category: no new code, no resend, ever. Checked BEFORE anything is sent.
-    if (existingOtp && new Date(existingOtp.expires_at).getTime() < Date.now()) {
-      return NextResponse.json(
-        { error: "This number was already sent a code earlier for this category. Only one code is allowed per number, so another can't be sent." },
-        { status: 403 }
-      );
-    }
-
-    if (existingOtp && !forceResend) {
-      return NextResponse.json({ ok: true, alreadySent: true });
-    }
-
-    const code = deriveOtpCode(phone, categoryId);
+    const derived = deriveOtpCode(phone, categoryId);
+    const code = derived ?? generateOtpCode();
     const codeHash = hashValue(code);
     const validUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    if (existingOtp) {
-      // Resend (only reachable inside the original 5-minute window): same row,
-      // same code, expiry NOT extended. Older random-code rows move to the
-      // derived code once.
-      await supabase
-        .from("otp_codes")
-        .update({ code_hash: codeHash, attempts: 0 })
-        .eq("id", existingOtp.id);
-    } else {
-      await supabase.from("otp_codes").insert({
-        category_id: categoryId,
-        phone_hash: phoneHash,
-        code_hash: codeHash,
-        expires_at: validUntil,
-      });
+    // ONE atomic call: checks the 20-vote cap, checks for an existing code,
+    // and performs the insert/update for it — all inside one advisory-lock-
+    // guarded Postgres transaction (request_otp_slot, see its own migration
+    // for the full explanation). This is what actually closes the race that
+    // let two near-simultaneous requests for the same phone+category both
+    // slip past a "does it already exist?" check before either write
+    // landed — confirmed happening in production before this fix.
+    const { data: slot, error: slotErr } = await supabase.rpc("request_otp_slot", {
+      p_category_id: categoryId,
+      p_phone_hash: phoneHash,
+      p_force_resend: !!forceResend,
+      p_code_hash: codeHash,
+      p_expires_at: validUntil,
+    });
+
+    if (slotErr) throw slotErr;
+
+    if (slot === "limit_reached") {
+      return NextResponse.json(
+        { error: `This phone number has already used all ${VOTE_LIMIT} votes allowed in this category.` },
+        { status: 409 }
+      );
+    }
+    if (slot === "blocked_expired") {
+      return NextResponse.json(
+        {
+          error:
+            "This number was already sent a code earlier for this category. Only one code is allowed per number, so another can't be sent.",
+        },
+        { status: 403 }
+      );
+    }
+    if (slot === "already_sent") {
+      return NextResponse.json({ ok: true, alreadySent: true });
     }
 
-    await sendOtpSms(phone, code);
+    // slot === "send" — the row is already safely written at this point, so
+    // only now does the request spend real money calling Celcom. If the SMS
+    // send itself fails, the row still exists, meaning a bare retry of this
+    // same request would correctly be treated as "already sent" rather than
+    // writing a second row — right for preventing duplicates, but it does
+    // mean a genuine provider failure here needs the voter to use Resend.
+    // Logged clearly either way so a failure is visible, not silent.
+    try {
+      await sendOtpSms(phone, code);
+    } catch (smsErr) {
+      Sentry.captureException(smsErr);
+      console.error("[otp-request] SMS send failed after slot was claimed:", smsErr instanceof Error ? smsErr.message : smsErr);
+      return NextResponse.json({ error: "Couldn't send the SMS right now. Please try Resend in a moment." }, { status: 502 });
+    }
 
-    return NextResponse.json({ ok: true, resent: !!existingOtp });
+    return NextResponse.json({ ok: true, resent: !!existingPeek });
   } catch (err: any) {
     Sentry.captureException(err);
     console.error("[otp-request] failed:", err?.message || err);

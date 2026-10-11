@@ -5,6 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { SiteFooter } from "@/components/site-footer";
 import { MAIN_SITE_URL, GALA_TICKETS_URL } from "@/lib/constants";
 
+// This page previously had NO caching at all — every single visitor hit
+// Supabase fresh just to load the category list, on the highest-traffic
+// page on the whole site. Same 15s window as the vote category pages: short
+// enough that a category opening for voting still shows up almost
+// immediately, long enough to absorb real traffic without hammering the
+// database on every page view.
+export const revalidate = 15;
+
 async function getCategories() {
   const supabase = createClient();
   const { data } = await supabase.from("categories").select("*").order("sort_order", { ascending: true });
